@@ -6,7 +6,8 @@ import shutil
 import time
 from pathlib import Path
 
-from openai import OpenAI
+from langfuse import get_client
+from langfuse.openai import OpenAI  # same client as openai's, but each call is traced in Langfuse
 
 from agent.tools import DATA, ROOT, SANDBOX_DATA, SCRATCH, run_python
 
@@ -72,7 +73,10 @@ def run_agent(question: str, guidelines: str, model: str, trace_path: Path | Non
     usage = {"input_tokens": 0, "cached_tokens": 0, "output_tokens": 0, "cost": 0.0}
     start = time.time()
 
-    with open(trace_path or os.devnull, "w") as trace:
+    langfuse = get_client()
+    with (open(trace_path or os.devnull, "w") as trace,
+          langfuse.start_as_current_observation(name="agent", as_type="agent",
+                                                input={"question": question, "guidelines": guidelines}) as span):
         def log(**event):
             trace.write(json.dumps(event) + "\n")
             trace.flush()
@@ -95,11 +99,14 @@ def run_agent(question: str, guidelines: str, model: str, trace_path: Path | Non
                     break
 
                 for call in reply.tool_calls:
-                    try:
-                        code = json.loads(call.function.arguments)["code"]
-                        output = run_python(code, scratch)
-                    except (json.JSONDecodeError, KeyError) as e:
-                        output = f"[bad tool call: {e}; send JSON with a 'code' field]"
+                    with langfuse.start_as_current_observation(name="run_python", as_type="tool") as tool:
+                        try:
+                            code = json.loads(call.function.arguments)["code"]
+                            output = run_python(code, scratch)
+                        except (json.JSONDecodeError, KeyError) as e:
+                            code = call.function.arguments
+                            output = f"[bad tool call: {e}; send JSON with a 'code' field]"
+                        tool.update(input=code, output=output)
                     messages.append({"role": "tool", "tool_call_id": call.id, "content": output})
                     log(step=step, role="tool", content=output)
         except Exception as e:  # still out of retries: keep the trace, let the caller decide
@@ -108,6 +115,8 @@ def run_agent(question: str, guidelines: str, model: str, trace_path: Path | Non
 
         result = {"answer": answer, "steps": step, "seconds": round(time.time() - start, 1), **usage}
         log(**result)
+        span.update(output=result)
+        result["trace_id"] = langfuse.get_current_trace_id()  # lets the eval attach a score
     return result
 
 
@@ -147,3 +156,4 @@ if __name__ == "__main__":
     print(json.dumps(result, indent=2))
     print("expected:", task["answer"])
     print("trace:", trace_path)
+    get_client().flush()  # send the Langfuse trace before exiting
