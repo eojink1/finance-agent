@@ -10,6 +10,8 @@ ROOT = Path(__file__).resolve().parent.parent
 SCRATCH = ROOT / "scratch"  # one subfolder per run, shared between its steps; the code runs there
 DATA = ROOT / "data" / "context"
 SANDBOX_DATA = "/data"  # where the code sees DATA
+HELPERS = Path(__file__).resolve().parent / "sandbox"  # tested helpers, seen as /helpers
+PRELOAD = "from fee_rules import *"  # run in every new session before the model's first call
 TIMEOUT_S = 60
 OUTPUT_CAP = 2000  # characters the model gets back
 
@@ -25,6 +27,7 @@ os.dup2(out.fileno(), 1)
 os.dup2(out.fileno(), 2)
 requests, sys.stdin = sys.stdin, open(os.devnull)
 namespace = {"__name__": "__main__"}
+exec(sys.argv[1], namespace)
 for line in requests:
     try:
         exec(compile(json.loads(line), "<cell>", "exec"), namespace)
@@ -45,7 +48,8 @@ def sandbox_command(scratch: Path) -> list[str]:
     """bwrap command that runs the session server with a tiny, mostly read-only filesystem and no network.
 
     Inside, the code sees only: /usr (system, read-only), /venv (pandas, read-only),
-    /data (DABstep files, read-only), /scratch (read-write) and an empty /tmp.
+    /data (DABstep files, read-only), /helpers (our helper modules, read-only),
+    /scratch (read-write) and an empty /tmp.
     No home folder, no .env, no network, no other processes.
     """
     venv = Path(sys.prefix)
@@ -57,6 +61,7 @@ def sandbox_command(scratch: Path) -> list[str]:
         "--symlink", "usr/lib64", "/lib64",
         "--ro-bind", str(venv), "/venv",
         "--ro-bind", str(DATA), SANDBOX_DATA,
+        "--ro-bind", str(HELPERS), "/helpers",
         "--bind", str(scratch), "/scratch",
         "--tmpfs", "/tmp",
         "--proc", "/proc",
@@ -68,7 +73,8 @@ def sandbox_command(scratch: Path) -> list[str]:
         "--clearenv",  # no API keys or other variables
         "--setenv", "PATH", "/venv/bin:/usr/bin",
         "--setenv", "HOME", "/scratch",
-        "/venv/bin/python", "-c", SERVER,
+        "--setenv", "PYTHONPATH", "/helpers",
+        "/venv/bin/python", "-c", SERVER, PRELOAD,
     ]
 
 

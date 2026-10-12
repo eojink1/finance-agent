@@ -8,6 +8,7 @@ tasks, k runs each, scored with the official `scorer.py`. Run: `uv run python -m
 | 2026-10-09 | Baseline: plain loop, `run_python`, manual in system prompt, 20-step limit | Nemotron 3 Super (free) | 13/30 (43%) | 2/10 | 9/30 | 13.7 | 5.11M (4.50M, 88%) | 265k | $0 | — |
 | 2026-10-09 | Baseline repeat (same code + Langfuse tracing) | Nemotron 3 Super (free) | 11/30 (37%) | 2/10 | 11/30 | 12.2 | 4.15M (3.57M, 86%) | 228k | $0 | — |
 | 2026-10-10 | Persistent Python session per task (variables survive between steps) | Nemotron 3 Super (free) | 12/30 (40%) | 1/10 | 8/30 | 11.8 | 4.05M (3.54M, 87%) | 472k | $0 | yes |
+| 2026-10-11 | Fix B: tested fee-rule helpers preloaded in the Python session | Nemotron 3 Super (free) | 22/30 (73%) | 7/10 | 7/30 | 9.2 | 2.90M (2.50M, 86%) | 129k | $0 | yes |
 
 **Baseline over both runs: 24/60 (40%).** The two runs differ by 2 answers out of 30 with no code
 change, so a change has to move the score by more than ~3 answers per 30 before it counts as real.
@@ -97,3 +98,49 @@ match at step 2, then second-guessed it for 9 steps and switched to dropping the
 1273 run 1 it filtered `is_credit == True` again, ignoring the note. Written rules are followed
 inconsistently by this model. Reverted.
 
+## 2026-10-11 Fix B (tested fee-rule helpers preloaded in the Python session)
+
+`agent/sandbox/fee_rules.py` (checked by `checks/check_fee_rules.py`) is imported into every
+session; the prompt lists the helpers and says to use them instead of writing rule matching.
+Same tasks as Fix A, 2 runs each, Super, persistent session. Traces: `runs/2026-10-11_214640_…`
+(also in Langfuse).
+
+| Task | Before (Super, 3 evals) | Fix A | Fix B |
+|---|---|---|---|
+| 1273 | 8/9 | 0/2 | 1/2 |
+| 1305 | 3/9 | 1/2 | 2/2 |
+| 1464 | 4/9 | 1/2 | 2/2 |
+| 5 (control) | 9/9 | 2/2 | 2/2 |
+
+Fee tasks 5/6 (83%) vs 15/27 (56%) before. Average 7.75 steps; 28k output tokens for 8 runs
+(~3.6k per run vs ~16k before). The one miss, 1273 run 2, used the helpers but misread the
+question: 1273 is about rules in general, yet the model picked one real payment and passed that
+merchant's facts (capture delay, volume, fraud level) to `matching_fee_rules`, getting 0 rules.
+At step 12 it made the right call (scheme + credit only) but kept adding filters, then wrote its
+own matcher (also 0) and hit the step limit.
+Run 1 called `matching_fee_rules(card_scheme='GlobalCard', is_credit=True)` and finished in 5.
+6 runs is a small sample; the full 10-task eval will confirm.
+
+### Full eval
+
+Traces: `runs/2026-10-11_223202_…` (also in Langfuse). 16.6 min, 0 API errors.
+
+```
+task     5  easy  ✓✓✓
+task    49  easy  ✓✓✓
+task    70  easy  ✗✗✗   no answer x3 (expected 'Not Applicable')
+task  1273  hard  ✓✓✓
+task  1305  hard  ✓✓✓
+task  1464  hard  ✓✓✓
+task  1681  hard  ✓✓✓
+task  1753  hard  ✓✓✓
+task  1871  hard  ✗✓✗   no answer x2
+task  2697  hard  ✗✗✗   no answer x2, 'TransactPlus:61.05' x1 (expected 'E:13.57')
+```
+
+22/30 (73%) vs the 24/60 (40%) baseline: +10 answers per 30, well above the ~3 noise threshold.
+pass^3 went from 1-2/10 to 7/10, average steps from ~12 to 9.2, and output tokens from 472k to
+129k. All 8 misses are on three tasks (70, 1871, 2697), and 7 of them hit the 20-step limit.
+(`runs/2026-10-11_220519_…` is an aborted earlier attempt with no summary; ignore it.)
+
+**Kept** (decided 2026-10-12).
