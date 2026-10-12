@@ -9,6 +9,9 @@ tasks, k runs each, scored with the official `scorer.py`. Run: `uv run python -m
 | 2026-10-09 | Baseline repeat (same code + Langfuse tracing) | Nemotron 3 Super (free) | 11/30 (37%) | 2/10 | 11/30 | 12.2 | 4.15M (3.57M, 86%) | 228k | $0 | — |
 | 2026-10-10 | Persistent Python session per task (variables survive between steps) | Nemotron 3 Super (free) | 12/30 (40%) | 1/10 | 8/30 | 11.8 | 4.05M (3.54M, 87%) | 472k | $0 | yes |
 | 2026-10-11 | Fix B: tested fee-rule helpers preloaded in the Python session | Nemotron 3 Super (free) | 22/30 (73%) | 7/10 | 7/30 | 9.2 | 2.90M (2.50M, 86%) | 129k | $0 | yes |
+| 2026-10-12 | Fix B, model comparison (+ `cache_control` marks for Claude) | Claude Haiku 5.5 | 23/30 (77%) | 7/10 | 0/30 | 4.2 | 1.41M (1.33M, 94%) | 52k | $0.050 | — |
+| 2026-10-12 | Fix B, model comparison | MiMo-V2.6-Flash | 24/30 (80%) | 8/10 | 2/30 | 7.3 | 2.27M (1.99M, 88%) | 58k | $0.058 | — |
+| 2026-10-12 | Fix B, model comparison | Muse Spark 1.3 (contributor) | 21/30 (70%) | 7/10 | 2/30 | 7.9 | 2.32M (1.46M, 63%) | 88k | $0.106 | — |
 
 **Baseline over both runs: 24/60 (40%).** The two runs differ by 2 answers out of 30 with no code
 change, so a change has to move the score by more than ~3 answers per 30 before it counts as real.
@@ -144,3 +147,49 @@ pass^3 went from 1-2/10 to 7/10, average steps from ~12 to 9.2, and output token
 (`runs/2026-10-11_220519_…` is an aborted earlier attempt with no summary; ignore it.)
 
 **Kept** (decided 2026-10-12).
+
+## 2026-10-12 cheap-model comparison for the leaderboard run
+
+Goal: pick a model for the full 450-task run and submission with a budget of ~$2-3. Same code
+as Fix B on all models. Candidates were chosen from OpenRouter on price (estimated full run
+under $2) and published agent / tool-use scores; Muse Spark 1.3 and Haiku 5.5 first, MiMo added
+when Muse Spark was blocked by account settings (it needs an 18+ confirmation and allowing
+paid-model training: the "contributor" tier trains on prompts; fine for public DABstep data,
+switch it off again before phase 2).
+
+Haiku needed one code change: Anthropic only caches up to a `cache_control` mark, so
+`with_cache_marks` in `agent/loop.py` marks the system prompt and the newest message for
+`anthropic/` models (other models get unchanged requests). Checked on task 1305: 72% of input
+cached on 1 run, 94% over the 30-run eval.
+
+Traces: `runs/2026-10-12_013614_anthropic_…`, `runs/2026-10-12_013614_xiaomi_…`,
+`runs/2026-10-12_014146_meta_…` (also in Langfuse). `runs/2026-10-12_013542_meta_…` and
+`…013640_meta_…` are the blocked attempts (all 403, $0); `…013557_anthropic_…` is the 1-task
+caching check.
+
+| Model | Correct | pass^3 | Avg steps | Minutes | Cost (30 runs) | Full run (× 15) |
+|---|---|---|---|---|---|---|
+| Nemotron 3 Super (free) | 22/30 (73%) | 7/10 | 9.2 | 16.6 | $0 | $0, ~5 days of free quota |
+| Claude Haiku 5.5 | 23/30 (77%) | 7/10 | 4.2 | 2.1 | $0.050 | ~$0.75 |
+| MiMo-V2.6-Flash | 24/30 (80%) | 8/10 | 7.3 | 9.1 | $0.058 | ~$0.87 |
+| Muse Spark 1.3 (contributor) | 21/30 (70%) | 7/10 | 7.9 | 6.5 | $0.106 | ~$1.60 |
+
+```
+task            Nemotron  Haiku  MiMo  Muse
+task     5  easy  ✓✓✓     ✓✓✓    ✓✓✓   ✓✓✓
+task    49  easy  ✓✓✓     ✓✓✓    ✓✓✓   ✗✗✗  'A. NL' x3
+task    70  easy  ✗✗✗     ✗✗✗    ✗✗✗   ✗✗✗  all models answer yes/no (expected 'Not Applicable')
+task  1273  hard  ✓✓✓     ✓✓✓    ✓✓✓   ✓✓✓
+task  1305  hard  ✓✓✓     ✓✓✓    ✓✓✓   ✓✓✓
+task  1464  hard  ✓✓✓     ✓✗✓    ✓✓✓   ✓✓✓  Haiku run 2 missed 3 IDs
+task  1681  hard  ✓✓✓     ✓✓✓    ✓✓✓   ✓✓✓
+task  1753  hard  ✓✓✓     ✓✓✓    ✓✓✓   ✓✓✓
+task  1871  hard  ✗✓✗     ✓✓✓    ✓✓✓   ✓✓✓
+task  2697  hard  ✗✗✗     ✗✗✗    ✗✗✗   ✗✗✗  no model gets 'E:13.57'
+```
+
+All four are within the ~3-answer noise of each other: accuracy doesn't separate them on 30 runs.
+Every model fails 70 and 2697, so those are agent or task problems, not model problems. Haiku
+is the fastest and cheapest (fewest steps, never hit the step limit); the estimates from Fix B's
+token use (~$1.94) were too high for Haiku and MiMo because they take fewer steps than Nemotron.
+Muse Spark costs the most of the paid three: only 63% of its input was cached.

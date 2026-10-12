@@ -100,7 +100,7 @@ def run_agent(question: str, guidelines: str, model: str, trace_path: Path | Non
         try:
             for step in range(1, MAX_STEPS + 1):
                 response = client.chat.completions.create(
-                    model=model, messages=messages, tools=TOOLS,
+                    model=model, messages=with_cache_marks(messages, model), tools=TOOLS,
                     extra_body={"usage": {"include": True}},  # OpenRouter adds the cost in USD
                 )
                 add_usage(usage, response.usage)
@@ -133,6 +133,25 @@ def run_agent(question: str, guidelines: str, model: str, trace_path: Path | Non
         span.update(output=result)
         result["trace_id"] = langfuse.get_current_trace_id()  # lets the eval attach a score
     return result
+
+
+def with_cache_marks(messages: list[dict], model: str) -> list[dict]:
+    """Mark the system prompt and the newest message as cacheable, for Claude models only.
+
+    Other providers cache repeated prompt prefixes by themselves; Anthropic caches only up to
+    a `cache_control` mark. Marking the newest message each step caches the whole conversation
+    so far, so the next step pays the cached price for all of it. Returns a marked copy.
+    """
+    if not model.startswith("anthropic/"):
+        return messages
+    marked = list(messages)
+    for i in {0, len(marked) - 1}:  # the system prompt, and the newest message
+        message = dict(marked[i])
+        if isinstance(message.get("content"), str) and message["content"]:
+            message["content"] = [{"type": "text", "text": message["content"],
+                                   "cache_control": {"type": "ephemeral"}}]
+            marked[i] = message
+    return marked
 
 
 def add_usage(total: dict, usage) -> None:
