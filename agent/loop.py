@@ -9,7 +9,7 @@ from pathlib import Path
 from langfuse import get_client
 from langfuse.openai import OpenAI  # same client as openai's, but each call is traced in Langfuse
 
-from agent.tools import DATA, ROOT, SANDBOX_DATA, SCRATCH, run_python
+from agent.tools import DATA, ROOT, SANDBOX_DATA, SCRATCH, PythonSession
 
 MAX_STEPS = 20
 
@@ -18,9 +18,9 @@ TOOLS = [{
     "function": {
         "name": "run_python",
         "description": (
-            "Run Python code in a fresh process and return what it printed (stdout and "
-            "stderr, cut to 2,000 characters). Variables do not survive between calls; "
-            "save anything worth keeping to a file in the current folder. pandas is installed."
+            "Run Python code and return what it printed (stdout and stderr, cut to 2,000 "
+            "characters). Like a notebook: variables, imports and loaded data stay available "
+            "in later calls, so load each file once and reuse it. pandas is installed."
         ),
         "parameters": {
             "type": "object",
@@ -75,6 +75,7 @@ def run_agent(question: str, guidelines: str, model: str, trace_path: Path | Non
 
     langfuse = get_client()
     with (open(trace_path or os.devnull, "w") as trace,
+          PythonSession(scratch) as python,
           langfuse.start_as_current_observation(name="agent", as_type="agent",
                                                 input={"question": question, "guidelines": guidelines}) as span):
         def log(**event):
@@ -102,7 +103,7 @@ def run_agent(question: str, guidelines: str, model: str, trace_path: Path | Non
                     with langfuse.start_as_current_observation(name="run_python", as_type="tool") as tool:
                         try:
                             code = json.loads(call.function.arguments)["code"]
-                            output = run_python(code, scratch)
+                            output = python.run(code)
                         except (json.JSONDecodeError, KeyError) as e:
                             code = call.function.arguments
                             output = f"[bad tool call: {e}; send JSON with a 'code' field]"

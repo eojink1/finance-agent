@@ -6,14 +6,14 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from agent.tools import DATA, OUTPUT_CAP, ROOT, SCRATCH, run_python
+from agent.tools import DATA, OUTPUT_CAP, ROOT, SCRATCH, PythonSession, run_python
 
 # 1. Normal code: output comes back.
 assert run_python("print(1 + 1)").strip() == "2"
 
 # 2. Errors come back too, so the model can fix its code.
 out = run_python("1 / 0")
-assert "ZeroDivisionError" in out and "[exit code 1]" in out, out
+assert "ZeroDivisionError" in out, out
 
 # 3. Endless loop is killed by the timeout.
 start = time.time()
@@ -31,7 +31,7 @@ os.environ["OPENROUTER_API_KEY"] = "secret-test-value"
 out = run_python("import os; print(os.environ.get('OPENROUTER_API_KEY'))")
 assert out.strip() == "None", out
 
-# 6. Each run is fresh, but files in scratch/ persist between runs.
+# 6. Separate sessions share nothing in memory, but files in scratch/ persist.
 run_python("x = 5; open('note.txt', 'w').write('kept')")
 assert "NameError" in run_python("print(x)")
 assert run_python("print(open('note.txt').read())").strip() == "kept"
@@ -55,5 +55,22 @@ assert (DATA / "payments.csv").stat().st_size > 20_000_000  # still intact
 # 10. Sandbox: no network.
 out = run_python("import socket; socket.create_connection(('1.1.1.1', 443), timeout=5)")
 assert "OSError" in out or "unreachable" in out, out
+
+# 11. A session keeps variables and imports between calls, like notebook cells.
+with PythonSession(timeout=2) as s:
+    s.run("import pandas as pd; x = 5")
+    assert s.run("print(x + 1, pd.__name__)").strip() == "6 pandas"
+    # An error doesn't lose the variables.
+    assert "ZeroDivisionError" in s.run("1 / 0")
+    assert s.run("print(x)").strip() == "5"
+    # Output printed below Python (C level, straight to the file descriptor) is captured too.
+    assert s.run("import os; os.write(1, b'raw\\n')").strip() == "raw"
+    # A timeout restarts the session and says so.
+    out = s.run("while True: pass")
+    assert "[killed" in out and "variables are gone" in out, out
+    assert "NameError" in s.run("print(x)")
+    # Killing the process also restarts it on the next call.
+    assert "session ended" in s.run("import os; os._exit(1)")
+    assert s.run("print('back')").strip() == "back"
 
 print("all run_python checks passed")

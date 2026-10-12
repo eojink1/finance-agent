@@ -1,5 +1,7 @@
-"""The agent's one tool: run model-written Python in a fresh, sandboxed subprocess."""
+"""The agent's one tool: run model-written Python in a sandboxed session that keeps its variables."""
 
+import json
+import select
 import subprocess
 import sys
 from pathlib import Path
@@ -11,9 +13,36 @@ SANDBOX_DATA = "/data"  # where the code sees DATA
 TIMEOUT_S = 60
 OUTPUT_CAP = 2000  # characters the model gets back
 
+# Runs inside the sandbox. Reads one JSON-encoded code string per line, runs it in a namespace
+# that survives between calls (like notebook cells) and answers with one JSON line holding
+# everything the code printed. Prints go to a file at the OS level (fd 1 and 2), so even output
+# from C libraries can't mix with the replies, which use a private copy of the original stdout.
+SERVER = r"""
+import json, os, sys, traceback
+replies = os.fdopen(os.dup(1), "w")
+out = open("/tmp/.cell_output", "w+")
+os.dup2(out.fileno(), 1)
+os.dup2(out.fileno(), 2)
+requests, sys.stdin = sys.stdin, open(os.devnull)
+namespace = {"__name__": "__main__"}
+for line in requests:
+    try:
+        exec(compile(json.loads(line), "<cell>", "exec"), namespace)
+    except BaseException:
+        traceback.print_exc()
+    sys.stdout.flush()
+    sys.stderr.flush()
+    out.seek(0)
+    text = out.read()
+    out.seek(0)
+    out.truncate()
+    replies.write(json.dumps(text) + "\n")
+    replies.flush()
+"""
+
 
 def sandbox_command(scratch: Path) -> list[str]:
-    """bwrap command that runs Python with a tiny, mostly read-only filesystem and no network.
+    """bwrap command that runs the session server with a tiny, mostly read-only filesystem and no network.
 
     Inside, the code sees only: /usr (system, read-only), /venv (pandas, read-only),
     /data (DABstep files, read-only), /scratch (read-write) and an empty /tmp.
@@ -34,33 +63,65 @@ def sandbox_command(scratch: Path) -> list[str]:
         "--dev", "/dev",
         "--chdir", "/scratch",
         "--unshare-all",  # includes the network
-        "--die-with-parent",  # killed if the timeout kills bwrap
+        "--die-with-parent",  # killed if the agent dies
         "--new-session",
         "--clearenv",  # no API keys or other variables
         "--setenv", "PATH", "/venv/bin:/usr/bin",
         "--setenv", "HOME", "/scratch",
-        "/venv/bin/python", "-",  # "-" = read the program from stdin
+        "/venv/bin/python", "-c", SERVER,
     ]
 
 
+class PythonSession:
+    """One sandboxed Python process per task that keeps variables between calls, like a notebook.
+
+    It starts on the first call. If a call times out or the process dies, the next call
+    starts a fresh one, and the model is told its variables are gone.
+    """
+
+    def __init__(self, scratch: Path = SCRATCH / "default", timeout: float = TIMEOUT_S):
+        self.scratch = scratch
+        self.timeout = timeout
+        self.proc = None
+
+    def run(self, code: str) -> str:
+        """Run `code` and return what it printed, capped."""
+        if self.proc is None:
+            self.scratch.mkdir(parents=True, exist_ok=True)
+            self.proc = subprocess.Popen(sandbox_command(self.scratch), text=True,
+                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+        try:
+            self.proc.stdin.write(json.dumps(code) + "\n")
+            self.proc.stdin.flush()
+            if not select.select([self.proc.stdout], [], [], self.timeout)[0]:
+                self.close()
+                return (f"[killed: still running after {self.timeout:g} s. "
+                        "The Python session was restarted: earlier variables are gone]")
+            reply = self.proc.stdout.readline()
+        except BrokenPipeError:
+            reply = ""
+        if not reply:  # the process died, e.g. os._exit() or out of memory
+            self.close()
+            return "[the Python session ended: earlier variables are gone]"
+        return cap(json.loads(reply))
+
+    def close(self) -> None:
+        if self.proc:
+            self.proc.kill()
+            self.proc.wait()
+            self.proc = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+
 def run_python(code: str, scratch: Path = SCRATCH / "default", timeout: float = TIMEOUT_S) -> str:
-    """Run `code` with a fresh, sandboxed Python in `scratch` and return what it printed, capped."""
-    scratch.mkdir(parents=True, exist_ok=True)
-    try:
-        result = subprocess.run(
-            sandbox_command(scratch),
-            input=code,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-        output = result.stdout + result.stderr
-        if result.returncode != 0:
-            output += f"\n[exit code {result.returncode}]"
-    except subprocess.TimeoutExpired as e:
-        output = _text(e.stdout) + _text(e.stderr)
-        output += f"\n[killed: still running after {timeout:g} s]"
-    return cap(output)
+    """Run `code` once in a fresh session and close it (nothing is kept)."""
+    with PythonSession(scratch, timeout) as session:
+        return session.run(code)
 
 
 def cap(output: str, limit: int = OUTPUT_CAP) -> str:
@@ -69,10 +130,3 @@ def cap(output: str, limit: int = OUTPUT_CAP) -> str:
         return output
     cut = len(output) - limit
     return output[:limit] + f"\n[output truncated: {cut:,} more chars; print less]"
-
-
-def _text(b: bytes | str | None) -> str:
-    # On timeout, the partial output may come back as bytes.
-    if isinstance(b, bytes):
-        return b.decode(errors="replace")
-    return b or ""
