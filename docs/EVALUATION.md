@@ -193,3 +193,24 @@ Every model fails 70 and 2697, so those are agent or task problems, not model pr
 is the fastest and cheapest (fewest steps, never hit the step limit); the estimates from Fix B's
 token use (~$1.94) were too high for Haiku and MiMo because they take fewer steps than Nemotron.
 Muse Spark costs the most of the paid three: only 63% of its input was cached.
+
+## 2026-10-12 full run: all 450 tasks, Claude Haiku 5.5 (Fix B + caching)
+
+Picked Haiku from the comparison above: same accuracy as the others within noise, fastest,
+cheapest, never hit the step limit. `eval/run_eval.py` gained `--split all` (loads
+`data/tasks/all.jsonl`, skips scoring where the answer is hidden) and writes `submission.jsonl`
+(`task_id`, `agent_answer`) when `--k 1`. Traces: `runs/2026-10-12_141316_anthropic_…`
+(also in Langfuse); submission file in the same folder.
+
+| Tasks | Minutes (8 workers) | Errors | Hit step limit | Avg steps | Input tok (cached) | Output tok | Cost |
+|---|---|---|---|---|---|---|---|
+| 450 | 40.9 | 0 | 0 | 5.4 | 29.4M (27.7M, 94%) | 1.06M | $1.02 |
+
+Every task got an answer (2 are empty strings, which the guidelines allow for empty lists).
+Only 2 of 450 answers are "Not Applicable", although every model failed dev task 70 by answering
+yes/no where "Not Applicable" was expected: likely a systematic loss on the hidden set.
+**Leaderboard (submitted 2026-10-12 as `Independent / finance-agent-v1`, unvalidated):
+310/450 (68.9%): easy 60/72 (83.3%), hard 250/378 (66.1%).** Per-task scores:
+`data/task_scores/v1__Independent-finance-agent-v1__12-10-2026.jsonl` in the `adyen/DABstep`
+dataset. Dev was 77% on Haiku, so the hidden set is ~8 points harder for this agent, mostly on
+hard tasks. For scale: the best hard-split baseline in the DABstep paper (Q1 2025) was 14.6%.
