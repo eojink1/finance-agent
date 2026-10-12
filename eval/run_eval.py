@@ -2,6 +2,7 @@
 
 uv run python -m eval.run_eval --k 3            # 10 dev tasks
 uv run python -m eval.run_eval --k 1 --tasks 5 1273
+uv run python -m eval.run_eval --k 1 --split all  # all 450 tasks; writes submission.jsonl
 """
 
 import argparse
@@ -34,22 +35,30 @@ def run_one(task: dict, run: int, model: str, out_dir) -> dict:
             result = run_agent(task["question"], task["guidelines"], model,
                                trace_path=out_dir / f"{name}.jsonl", scratch=SCRATCH / out_dir.name / name)
         row |= result
-        row["correct"] = result["answer"] is not None and scorer.question_scorer(result["answer"], task["answer"])
-        get_client().create_score(name="correct", value=int(row["correct"]), data_type="BOOLEAN",
-                                  trace_id=result["trace_id"], comment=f"expected {task['answer']!r}")
+        if task["answer"]:  # hidden for the 440 test tasks: those are scored only by submission
+            row["correct"] = result["answer"] is not None and scorer.question_scorer(result["answer"], task["answer"])
+            get_client().create_score(name="correct", value=int(row["correct"]), data_type="BOOLEAN",
+                                      trace_id=result["trace_id"], comment=f"expected {task['answer']!r}")
+        else:
+            row["correct"] = None
     except Exception as e:
-        row |= {"answer": None, "correct": False, "error": repr(e)}
-    print(f"  {name}: {'✓' if row['correct'] else '✗'} {row['answer']!r} (expected {task['answer']!r})"
+        row |= {"answer": None, "correct": False if task["answer"] else None, "error": repr(e)}
+    print(f"  {name}: {MARKS[row['correct']]} {row['answer']!r} (expected {task['answer']!r})"
           + (f" ERROR {row['error']}" if "error" in row else ""), flush=True)
     return row
 
 
+MARKS = {True: "✓", False: "✗", None: "?"}  # ? = no public answer to score against
+
+
 def summarize(rows: list[dict], tasks: list[dict], k: int) -> dict:
-    by_task = {t["task_id"]: [r for r in rows if r["task_id"] == t["task_id"]] for t in tasks}
+    by_task = {t["task_id"]: [r for r in rows if r["task_id"] == t["task_id"]] for t in tasks if t["answer"]}
+    scored = [r for r in rows if r["correct"] is not None]
     total = lambda key: sum(r.get(key, 0) for r in rows)
     ok = [r for r in rows if "error" not in r]
     return {
-        "accuracy": sum(r["correct"] for r in rows) / len(rows),
+        "accuracy": sum(r["correct"] for r in scored) / len(scored) if scored else None,
+        "scored_runs": len(scored),
         f"pass^{k}": sum(all(r["correct"] for r in rs) for rs in by_task.values()),
         "tasks": len(tasks),
         "runs": len(rows),
@@ -68,11 +77,12 @@ def main():
     parser.add_argument("--tasks", nargs="*", help="task ids (default: all dev tasks)")
     parser.add_argument("--workers", type=int, default=2, help="runs in parallel (free models are rate-limited)")
     parser.add_argument("--model", help="default: MODEL from .env")
+    parser.add_argument("--split", choices=["dev", "all"], default="dev", help="10 dev tasks or all 450")
     args = parser.parse_args()
 
     load_env()
     model = args.model or os.environ["MODEL"]
-    tasks = [json.loads(l) for l in open(ROOT / "data" / "tasks" / "dev.jsonl")]
+    tasks = [json.loads(l) for l in open(ROOT / "data" / "tasks" / f"{args.split}.jsonl")]
     if args.tasks:
         tasks = [t for t in tasks if str(t["task_id"]) in args.tasks]
 
@@ -89,10 +99,14 @@ def main():
                **summarize(rows, tasks, args.k)}
     get_client().flush()
     (out_dir / "summary.json").write_text(json.dumps({"summary": summary, "rows": rows}, indent=2))
+    if args.k == 1:  # the leaderboard's format: one line per task; no answer counts as wrong
+        with open(out_dir / "submission.jsonl", "w") as f:
+            for r in rows:
+                f.write(json.dumps({"task_id": str(r["task_id"]), "agent_answer": r["answer"] or ""}) + "\n")
 
     print()
     for t in tasks:
-        marks = "".join("✓" if r["correct"] else "✗" for r in rows if r["task_id"] == t["task_id"])
+        marks = "".join(MARKS[r["correct"]] for r in rows if r["task_id"] == t["task_id"])
         print(f"task {t['task_id']:>5}  {t['level']:<4}  {marks}")
     print()
     print(json.dumps(summary, indent=2))
