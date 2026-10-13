@@ -214,3 +214,14 @@ yes/no where "Not Applicable" was expected: likely a systematic loss on the hidd
 `data/task_scores/v1__Independent-finance-agent-v1__12-10-2026.jsonl` in the `adyen/DABstep`
 dataset. Dev was 77% on Haiku, so the hidden set is ~8 points harder for this agent, mostly on
 hard tasks. For scale: the best hard-split baseline in the DABstep paper (Q1 2025) was 14.6%.
+
+## 2026-10-12 refactor: DABstep parts moved out of the agent (no behavior change intended)
+
+The system prompt and `fee_rules.py` moved to `datasets/dabstep/`; `run_agent` and the sandbox
+now take a `Dataset` (data folder, helpers folder, preload line, system prompt) so the bank test
+set can plug in the same way. The system prompt is byte-identical (same SHA-256) and both checks
+pass. Haiku 5.5, task 5: 1/1. Task 1305: 2/4 after vs 2/3 on the old code in the same hour;
+every miss is the same `0.127795`, from passing `account_type=['H']` (a list) to
+`matching_fee_rules`, which then skips the rules that list H. Model noise on both versions, not
+the refactor; 1305 was 3/3 on 2026-10-12 morning. The list-vs-string slip is a candidate helper
+fix (accept a one-item list), to be measured separately.

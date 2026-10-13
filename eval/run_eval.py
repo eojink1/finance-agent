@@ -17,6 +17,7 @@ from langfuse import get_client, propagate_attributes
 
 from agent.loop import load_env, run_agent
 from agent.tools import ROOT, SCRATCH
+from datasets.dabstep import DABSTEP
 
 # scorer.py is the leaderboard's own file, downloaded into data/ (not part of this repo).
 _spec = importlib.util.spec_from_file_location("scorer", ROOT / "data" / "scorer.py")
@@ -32,7 +33,7 @@ def run_one(task: dict, run: int, model: str, out_dir) -> dict:
         # In Langfuse: one session per eval, one trace per run, tagged and scored.
         with propagate_attributes(session_id=out_dir.name, trace_name=name, tags=[task["level"]],
                                   metadata={"task_id": str(task["task_id"]), "run": str(run), "model": model}):
-            result = run_agent(task["question"], task["guidelines"], model,
+            result = run_agent(task["question"], task["guidelines"], model, DABSTEP,
                                trace_path=out_dir / f"{name}.jsonl", scratch=SCRATCH / out_dir.name / name)
         row |= result
         if task["answer"]:  # hidden for the 440 test tasks: those are scored only by submission

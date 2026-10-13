@@ -9,7 +9,7 @@ from pathlib import Path
 from langfuse import get_client
 from langfuse.openai import OpenAI  # same client as openai's, but each call is traced in Langfuse
 
-from agent.tools import DATA, ROOT, SANDBOX_DATA, SCRATCH, PythonSession
+from agent.tools import ROOT, SCRATCH, Dataset, PythonSession
 
 MAX_STEPS = 20
 
@@ -39,47 +39,14 @@ def load_env(path: Path = ROOT / ".env") -> None:
             os.environ.setdefault(key.strip(), value.strip())
 
 
-def system_prompt() -> str:
-    files = "\n".join(f"- {SANDBOX_DATA}/{p.name}" for p in sorted(DATA.iterdir()))
-    return f"""You are a data analyst. Answer the question by writing and running Python code \
-with the run_python tool, one step at a time: look at the data, compute, check your result.
-
-Data files (use these absolute paths):
-{files}
-
-Tested fee-rule helpers are already loaded in the Python session; use them instead of writing \
-your own rule matching. They follow the manual (a null or empty-list field in a rule matches \
-anything; ranges, capture delay, intracountry and monthly stats are handled):
-- matching_fee_rules(card_scheme=, account_type=, merchant_category_code=, is_credit=, aci=, \
-intracountry=, capture_delay=, monthly_volume=, monthly_fraud_level=) -> list of rule dicts. \
-Pass only the facts the question gives; the rest are not filtered on.
-- fee(rule, amount) -> fee in euros for one transaction
-- merchant_info(merchant) -> the merchant's record (account_type, capture_delay, MCC, acquirers)
-- monthly_stats(merchant, year, month) -> {{"volume": euros, "fraud_level": percent}}
-- transaction_rules(row) -> rules that apply to one payments.csv row
-- applicable_fee_ids(merchant, year, month=None, day_of_year=None) -> sorted rule IDs that \
-apply to any of the merchant's payments in that period
-Call help(name) for details.
-
-When you are done, reply without a tool call. End the reply with one line:
-FINAL ANSWER: <answer>
-The answer must follow the question's guidelines exactly.
-
-# payments-readme.md
-{(DATA / "payments-readme.md").read_text()}
-
-# manual.md
-{(DATA / "manual.md").read_text()}"""
-
-
-def run_agent(question: str, guidelines: str, model: str, trace_path: Path | None = None,
+def run_agent(question: str, guidelines: str, model: str, dataset: Dataset, trace_path: Path | None = None,
               scratch: Path = SCRATCH / "default") -> dict:
     """Run one task in an empty `scratch` folder. Returns the answer plus step, token, cost and time counts."""
     # The SDK retries rate limits (429) and server errors itself, waiting longer each time.
     client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=os.environ["OPENROUTER_API_KEY"],
                     max_retries=5)
     messages = [
-        {"role": "system", "content": system_prompt()},
+        {"role": "system", "content": dataset.system_prompt()},
         {"role": "user", "content": f"{question}\n\nGuidelines: {guidelines}"},
     ]
     shutil.rmtree(scratch, ignore_errors=True)  # no files left over from an earlier run
@@ -89,7 +56,7 @@ def run_agent(question: str, guidelines: str, model: str, trace_path: Path | Non
 
     langfuse = get_client()
     with (open(trace_path or os.devnull, "w") as trace,
-          PythonSession(scratch) as python,
+          PythonSession(dataset, scratch) as python,
           langfuse.start_as_current_observation(name="agent", as_type="agent",
                                                 input={"question": question, "guidelines": guidelines}) as span):
         def log(**event):

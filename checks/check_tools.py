@@ -3,10 +3,15 @@
 import os
 import sys
 import time
+from functools import partial
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from agent.tools import DATA, OUTPUT_CAP, ROOT, SCRATCH, PythonSession, run_python
+from agent import tools
+from agent.tools import OUTPUT_CAP, ROOT, SCRATCH, PythonSession
+from datasets.dabstep import DABSTEP, DATA
+
+run_python = partial(tools.run_python, dataset=DABSTEP)
 
 # 1. Normal code: output comes back.
 assert run_python("print(1 + 1)").strip() == "2"
@@ -57,7 +62,7 @@ out = run_python("import socket; socket.create_connection(('1.1.1.1', 443), time
 assert "OSError" in out or "unreachable" in out, out
 
 # 11. A session keeps variables and imports between calls, like notebook cells.
-with PythonSession(timeout=2) as s:
+with PythonSession(DABSTEP, timeout=2) as s:
     s.run("import pandas as pd; x = 5")
     assert s.run("print(x + 1, pd.__name__)").strip() == "6 pandas"
     # An error doesn't lose the variables.

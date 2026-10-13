@@ -4,16 +4,24 @@ import json
 import select
 import subprocess
 import sys
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRATCH = ROOT / "scratch"  # one subfolder per run, shared between its steps; the code runs there
-DATA = ROOT / "data" / "context"
-SANDBOX_DATA = "/data"  # where the code sees DATA
-HELPERS = Path(__file__).resolve().parent / "sandbox"  # tested helpers, seen as /helpers
-PRELOAD = "from fee_rules import *"  # run in every new session before the model's first call
+SANDBOX_DATA = "/data"  # where the code sees the dataset's files
 TIMEOUT_S = 60
 OUTPUT_CAP = 2000  # characters the model gets back
+
+
+@dataclass(frozen=True)
+class Dataset:
+    """Everything the agent needs to know about one set of tasks (DABstep, the bank test set)."""
+    data: Path  # files the code sees read-only at /data
+    helpers: Path  # tested helper modules, importable inside the sandbox, seen read-only at /helpers
+    preload: str  # run in every new session before the model's first call
+    system_prompt: Callable[[], str]
 
 # Runs inside the sandbox. Reads one JSON-encoded code string per line, runs it in a namespace
 # that survives between calls (like notebook cells) and answers with one JSON line holding
@@ -44,11 +52,11 @@ for line in requests:
 """
 
 
-def sandbox_command(scratch: Path) -> list[str]:
+def sandbox_command(dataset: Dataset, scratch: Path) -> list[str]:
     """bwrap command that runs the session server with a tiny, mostly read-only filesystem and no network.
 
     Inside, the code sees only: /usr (system, read-only), /venv (pandas, read-only),
-    /data (DABstep files, read-only), /helpers (our helper modules, read-only),
+    /data (the dataset's files, read-only), /helpers (our helper modules, read-only),
     /scratch (read-write) and an empty /tmp.
     No home folder, no .env, no network, no other processes.
     """
@@ -60,8 +68,8 @@ def sandbox_command(scratch: Path) -> list[str]:
         "--symlink", "usr/lib", "/lib",
         "--symlink", "usr/lib64", "/lib64",
         "--ro-bind", str(venv), "/venv",
-        "--ro-bind", str(DATA), SANDBOX_DATA,
-        "--ro-bind", str(HELPERS), "/helpers",
+        "--ro-bind", str(dataset.data), SANDBOX_DATA,
+        "--ro-bind", str(dataset.helpers), "/helpers",
         "--bind", str(scratch), "/scratch",
         "--tmpfs", "/tmp",
         "--proc", "/proc",
@@ -74,7 +82,7 @@ def sandbox_command(scratch: Path) -> list[str]:
         "--setenv", "PATH", "/venv/bin:/usr/bin",
         "--setenv", "HOME", "/scratch",
         "--setenv", "PYTHONPATH", "/helpers",
-        "/venv/bin/python", "-c", SERVER, PRELOAD,
+        "/venv/bin/python", "-c", SERVER, dataset.preload,
     ]
 
 
@@ -85,7 +93,8 @@ class PythonSession:
     starts a fresh one, and the model is told its variables are gone.
     """
 
-    def __init__(self, scratch: Path = SCRATCH / "default", timeout: float = TIMEOUT_S):
+    def __init__(self, dataset: Dataset, scratch: Path = SCRATCH / "default", timeout: float = TIMEOUT_S):
+        self.dataset = dataset
         self.scratch = scratch
         self.timeout = timeout
         self.proc = None
@@ -94,7 +103,7 @@ class PythonSession:
         """Run `code` and return what it printed, capped."""
         if self.proc is None:
             self.scratch.mkdir(parents=True, exist_ok=True)
-            self.proc = subprocess.Popen(sandbox_command(self.scratch), text=True,
+            self.proc = subprocess.Popen(sandbox_command(self.dataset, self.scratch), text=True,
                                          stdin=subprocess.PIPE, stdout=subprocess.PIPE)
         try:
             self.proc.stdin.write(json.dumps(code) + "\n")
@@ -124,9 +133,9 @@ class PythonSession:
         self.close()
 
 
-def run_python(code: str, scratch: Path = SCRATCH / "default", timeout: float = TIMEOUT_S) -> str:
+def run_python(code: str, dataset: Dataset, scratch: Path = SCRATCH / "default", timeout: float = TIMEOUT_S) -> str:
     """Run `code` once in a fresh session and close it (nothing is kept)."""
-    with PythonSession(scratch, timeout) as session:
+    with PythonSession(dataset, scratch, timeout) as session:
         return session.run(code)
 
 

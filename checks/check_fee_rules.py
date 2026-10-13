@@ -6,10 +6,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 os.environ["DABSTEP_DATA"] = str(ROOT / "data" / "context")
-sys.path.insert(0, str(ROOT / "agent" / "sandbox"))
+sys.path.insert(0, str(ROOT / "datasets" / "dabstep" / "helpers"))
 sys.path.insert(0, str(ROOT))
 import fee_rules as fr
 from agent.tools import PythonSession
+from datasets.dabstep import DABSTEP
 
 # 1. The manual's fee formula: fixed_amount + rate * amount / 10000.
 assert fr.fee({"fixed_amount": 0.1, "rate": 19}, 10) == 0.1 + 19 * 10 / 10000
@@ -42,7 +43,7 @@ assert len(fr.matching_fee_rules()) == len(fr.fee_rules()) == 1000
 assert (fr._month(2023, 31), fr._month(2023, 32), fr._month(2023, 60)) == (1, 2, 3)
 
 # 8. Inside the agent's sandbox the helpers are preloaded, read-only and use /data.
-with PythonSession() as s:
+with PythonSession(DABSTEP) as s:
     assert s.run("print(len(matching_fee_rules(aci='B')))").strip() == str(len(fr.matching_fee_rules(aci="B")))
     assert s.run("import os; print(os.access('/helpers/fee_rules.py', os.W_OK))").strip() == "False"
 
