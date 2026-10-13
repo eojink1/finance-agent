@@ -1,6 +1,6 @@
 """Make a synthetic bank export for the phase 2 test set: data/bank/transactions.csv.
 
-uv run python -m bank.make_data
+uv run python -m datasets.bank.make_data
 
 Same seed, same file. The patterns the questions probe are planted on purpose: a one-off
 purchase in March, a Netflix price rise in April, Hulu cancelled after February, a refunded
@@ -11,6 +11,7 @@ import csv
 import random
 import shutil
 from datetime import date, timedelta
+from pathlib import Path
 
 from agent.tools import ROOT
 
@@ -68,7 +69,7 @@ def main():
         out.writerow(["date", "description", "amount", "category", "account"])
         for d, desc, amount, cat, acct in transactions(random.Random(2026)):
             out.writerow([d.isoformat(), desc, f"{amount:.2f}", cat, acct])
-    shutil.copy(ROOT / "bank" / "transactions-readme.md", OUT)
+    shutil.copy(Path(__file__).resolve().parent / "transactions-readme.md", OUT)
     print(f"wrote {OUT / 'transactions.csv'}")
 
 

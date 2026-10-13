@@ -1,6 +1,6 @@
 """Write the phase 2 test set: data/tasks/bank.jsonl, in the same format as DABstep's tasks.
 
-uv run python -m bank.make_data && uv run python -m bank.make_questions
+uv run python -m datasets.bank.make_data && uv run python -m datasets.bank.make_questions
 
 Every answer is computed from transactions.csv with the definitions in transactions-readme.md,
 never typed by hand, so the key matches the data even if the generator changes. Questions whose
