@@ -153,7 +153,8 @@ if __name__ == "__main__":
     task = next(t for t in tasks if str(t["task_id"]) == task_id)
     (ROOT / "runs").mkdir(exist_ok=True)
     trace_path = ROOT / "runs" / f"task_{task_id}.jsonl"
-    result = run_agent(task["question"], task["guidelines"], os.environ["MODEL"], trace_path)
+    from datasets.dabstep import DABSTEP
+    result = run_agent(task["question"], task["guidelines"], os.environ["MODEL"], DABSTEP, trace_path)
     print(json.dumps(result, indent=2))
     print("expected:", task["answer"])
     print("trace:", trace_path)
