@@ -15,9 +15,12 @@ from datetime import datetime
 
 from langfuse import get_client, propagate_attributes
 
-from agent.loop import load_env, run_agent
+from agent import langchain_agent, loop
+from agent.loop import load_env
 from agent.tools import ROOT, SCRATCH
 from datasets.dabstep import DABSTEP
+
+AGENTS = {"plain": loop.run_agent, "langchain": langchain_agent.run_agent}
 
 # scorer.py is the leaderboard's own file, downloaded into data/ (not part of this repo).
 _spec = importlib.util.spec_from_file_location("scorer", ROOT / "data" / "scorer.py")
@@ -25,15 +28,15 @@ scorer = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(scorer)
 
 
-def run_one(task: dict, run: int, model: str, out_dir) -> dict:
+def run_one(task: dict, run: int, model: str, agent: str, out_dir) -> dict:
     """One attempt at one task. API failures count as wrong, so the eval keeps going."""
     name = f"task_{task['task_id']}_run{run}"
     row = {"task_id": task["task_id"], "level": task["level"], "run": run, "expected": task["answer"]}
     try:
         # In Langfuse: one session per eval, one trace per run, tagged and scored.
         with propagate_attributes(session_id=out_dir.name, trace_name=name, tags=[task["level"]],
-                                  metadata={"task_id": str(task["task_id"]), "run": str(run), "model": model}):
-            result = run_agent(task["question"], task["guidelines"], model, DABSTEP,
+                                  metadata={"task_id": str(task["task_id"]), "run": str(run), "model": model, "agent": agent}):
+            result = AGENTS[agent](task["question"], task["guidelines"], model, DABSTEP,
                                trace_path=out_dir / f"{name}.jsonl", scratch=SCRATCH / out_dir.name / name)
         row |= result
         if task["answer"]:  # hidden for the 440 test tasks: those are scored only by submission
@@ -78,6 +81,7 @@ def main():
     parser.add_argument("--tasks", nargs="*", help="task ids (default: all dev tasks)")
     parser.add_argument("--workers", type=int, default=2, help="runs in parallel (free models are rate-limited)")
     parser.add_argument("--model", help="default: MODEL from .env")
+    parser.add_argument("--agent", choices=list(AGENTS), default="plain", help="hand-written loop or LangChain")
     parser.add_argument("--split", choices=["dev", "all"], default="dev", help="10 dev tasks or all 450")
     args = parser.parse_args()
 
@@ -87,16 +91,16 @@ def main():
     if args.tasks:
         tasks = [t for t in tasks if str(t["task_id"]) in args.tasks]
 
-    out_dir = ROOT / "runs" / f"{datetime.now():%Y-%m-%d_%H%M%S}_{model.replace('/', '_').replace(':', '_')}"
+    out_dir = ROOT / "runs" / f"{datetime.now():%Y-%m-%d_%H%M%S}_{args.agent}_{model.replace('/', '_').replace(':', '_')}"
     out_dir.mkdir(parents=True)
-    print(f"{len(tasks)} tasks x {args.k} runs on {model} -> {out_dir}")
+    print(f"{len(tasks)} tasks x {args.k} runs on {model} ({args.agent} agent) -> {out_dir}")
 
     start = time.time()
     jobs = [(t, run) for run in range(1, args.k + 1) for t in tasks]
     with ThreadPoolExecutor(args.workers) as pool:
-        rows = list(pool.map(lambda job: run_one(*job, model, out_dir), jobs))
+        rows = list(pool.map(lambda job: run_one(*job, model, args.agent, out_dir), jobs))
 
-    summary = {"model": model, "k": args.k, "minutes": round((time.time() - start) / 60, 1),
+    summary = {"model": model, "agent": args.agent, "k": args.k, "minutes": round((time.time() - start) / 60, 1),
                **summarize(rows, tasks, args.k)}
     get_client().flush()
     (out_dir / "summary.json").write_text(json.dumps({"summary": summary, "rows": rows}, indent=2))

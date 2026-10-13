@@ -12,6 +12,7 @@ tasks, k runs each, scored with the official `scorer.py`. Run: `uv run python -m
 | 2026-10-12 | Fix B, model comparison (+ `cache_control` marks for Claude) | Claude Haiku 5.5 | 23/30 (77%) | 7/10 | 0/30 | 4.2 | 1.41M (1.33M, 94%) | 52k | $0.050 | — |
 | 2026-10-12 | Fix B, model comparison | MiMo-V2.6-Flash | 24/30 (80%) | 8/10 | 2/30 | 7.3 | 2.27M (1.99M, 88%) | 58k | $0.058 | — |
 | 2026-10-12 | Fix B, model comparison | Muse Spark 1.3 (contributor) | 21/30 (70%) | 7/10 | 2/30 | 7.9 | 2.32M (1.46M, 63%) | 88k | $0.106 | — |
+| 2026-10-13 | LangChain `create_agent` (same prompt, tool and sandbox; sandbox thread fix) | Claude Haiku 5.5 | 22/30 (73%) | 6/10 | 0/30 | 4.1 | 1.38M (1.22M, 89%) | 55k | $0.059 | — |
 
 **Baseline over both runs: 24/60 (40%).** The two runs differ by 2 answers out of 30 with no code
 change, so a change has to move the score by more than ~3 answers per 30 before it counts as real.
@@ -225,3 +226,41 @@ every miss is the same `0.127795`, from passing `account_type=['H']` (a list) to
 `matching_fee_rules`, which then skips the rules that list H. Model noise on both versions, not
 the refactor; 1305 was 3/3 on 2026-10-12 morning. The list-vs-string slip is a candidate helper
 fix (accept a one-item list), to be measured separately.
+
+## 2026-10-13 the agent rebuilt on LangChain
+
+`agent/langchain_agent.py`: `create_agent` with `ChatOpenAI` pointed at OpenRouter, `run_python`
+as a `@tool` over the same sandbox, the same DABstep system prompt, and
+`ModelCallLimitMiddleware(run_limit=20)` for the step limit. 78 lines vs 160 for `agent/loop.py`.
+Claude caching is one request-level `cache_control` that OpenRouter applies to the whole
+conversation (replaces `with_cache_marks`); 95% of input cached. Run with `--agent langchain`.
+Traces: `runs/2026-10-13_091305_langchain_…` (also in Langfuse); `runs/2026-10-13_014858_langchain_…` is the run
+before the sandbox thread fix.
+
+| Agent (Haiku 5.5) | Correct | pass^3 | Avg steps | Minutes | Cost (30 runs) |
+|---|---|---|---|---|---|
+| Plain loop (2026-10-12) | 23/30 (77%) | 7/10 | 4.2 | 2.1 | $0.050 |
+| LangChain, before the sandbox thread fix | 22/30 (73%) | 6/10 | 6.7 | 2.0 | $0.073 |
+| LangChain | 22/30 (73%) | 6/10 | 4.1 | 1.8 | $0.059 |
+
+Same accuracy within the ~3-answer noise, same steps per task, cost within ~20%; same failures
+(70: answers 'Yes', not 'Not Applicable'; 2697, now answered every run with a wrong ACI instead of
+running out of steps). Before the sandbox thread fix (below) it took 6.7 steps and cost ~45% more.
+
+Three things the abstraction hid, found on the way:
+- **No request timeout.** `ChatOpenAI` waits forever by default (the plain OpenAI client gives up
+  after 600 s); set `timeout=120`.
+- **`recursion_limit` counts graph steps, not model calls.** Each model call is ~4 LangGraph steps
+  (limit check, model, tools, routing), so a limit of 80 crashed runs at ~20 calls with
+  `GraphRecursionError` before the call limit could stop them. When the call limit does stop a
+  run, it adds an AI message ("Model call limits exceeded") that must not be read as the answer.
+- **Parallel tool calls run in parallel threads.** LangGraph's tool node runs a reply's tool calls
+  at the same time; two threads sharing one sandbox process could take each other's reply and
+  wait forever (two runs hung per eval). `PythonSession.run` now takes a lock; checked by
+  `checks/check_tools.py` #12.
+- **Each tool call runs in a new thread, and the sandbox died with it.** bwrap's
+  `--die-with-parent` kills the sandbox when the *thread* that started it exits (Linux ties
+  `PR_SET_PDEATHSIG` to the thread, not the process). Every second call to a session failed with
+  "session ended", so the model reloaded data, gave up on the helpers and wrote its own matcher
+  (seen in 2697: 10 of 20 calls failed). Sandboxes now start from one long-lived launcher thread;
+  checked by `checks/check_tools.py` #13. After the fix: 0 failed calls, 6.7 → 4.1 steps.
