@@ -58,7 +58,8 @@ An investigation loop with a DABstep score. No database, no framework, no UI.
 - **Interfaces:** MCP server (official `mcp` SDK) for asking questions from Claude Desktop; React +
   Vite dashboard for charts, subscriptions and approvals; CLI; scheduler for the monthly report
   and alerts.
-- **LangGraph:** port the plain loop and compare both on DABstep (accuracy, cost, lines of code).
+- **LangChain / LangGraph:** the agent moves to LangChain's `create_agent` in phase 1 (decided
+  2026-10-13, see Decisions); phase 2 adds LangGraph features (checkpoints, approvals, memory).
 - **Verifier agent, memory, guardrails, Langfuse:** see decisions below. Each is kept only if
   measured to help.
 
@@ -77,7 +78,7 @@ An investigation loop with a DABstep score. No database, no framework, no UI.
 | Second benchmark | None in phase 1. DAB skipped (multi-database, ~7 GB setup). InsightBench (find and explain insights, LLM-judged) is a candidate for phase 2 | 10 dev tasks + leaderboard is enough to steer the MVP; InsightBench tests the "explain my spending" skill DABstep doesn't |
 | Own labeled DABstep questions | Not now | Hard answers depend on reading the manual's fee rules; a self-made answer key could be wrong in ways we can't see. Add only if 10 dev tasks + leaderboard steer too slowly |
 | Learned helper library (what the top entries do) | After the plain baseline, as one measured change | Top entries (~90% hard) build tested reusable functions (fee matching etc.) from the dev answers and give a small model only their signatures. Questions are templated, so this works. Same idea fits phase 2: verified spending functions the agent calls |
-| Agent framework | Plain loop first, LangGraph in phase 2 | Learn the loop by hand, then use LangGraph where it saves work (checkpoints, approvals, memory), and measure both |
+| Agent framework | Plain loop for the phase 1 baseline (done, 68.9% on the leaderboard); from 2026-10-13 LangChain `create_agent` (built on LangGraph), using its abstractions wherever they exist. The plain loop is kept until the LangChain agent matches it on DABstep, then deleted | The user learns better top-down: build with the abstractions, then dig into what they hide when something breaks. The plain loop already taught the fundamentals and gives a score to compare against |
 | Sandbox | Stateless subprocess + scratch folder; Docker before real data | Simple and visible state; switch to a persistent kernel only if traces show wasted rework. Transaction text is written by outsiders, so code must run sealed off before real data |
 | Data access | One `run_python` tool (pandas, optional DuckDB); no separate SQL tool | Fewer tools, fewer wrong choices |
 | Database | PostgreSQL (phase 2) | Industry standard; also holds memory and LangGraph checkpoints; read-only role for the agent |

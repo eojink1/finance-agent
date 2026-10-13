@@ -15,4 +15,6 @@ Architecture diagrams are in `docs/diagrams/` (regenerate with `python3 make.py`
   next starts. Don't stack unreviewed changes.
 - Offer to let the user write the code: explain the concept and plan, let them implement it,
   then review their code instead of writing it yourself.
-- Keep the AI side in Python. Keep the MVP small: no database, framework or UI until phase 2.
+- Keep the AI side in Python. Use LangChain / LangGraph abstractions wherever they exist rather
+  than hand-written code; when one hides something that matters (or breaks), explain what it
+  does underneath. No database or UI until phase 2.
