@@ -7,7 +7,6 @@ import time
 from pathlib import Path
 
 from langfuse import get_client
-from langfuse.openai import OpenAI  # same client as openai's, but each call is traced in Langfuse
 
 from agent.tools import ROOT, SCRATCH, Dataset, PythonSession
 
@@ -42,6 +41,11 @@ def load_env(path: Path = ROOT / ".env") -> None:
 def run_agent(question: str, guidelines: str, model: str, dataset: Dataset, trace_path: Path | None = None,
               scratch: Path = SCRATCH / "default") -> dict:
     """Run one task in an empty `scratch` folder. Returns the answer plus step, token, cost and time counts."""
+    # Langfuse's OpenAI client traces each call, but importing it patches the openai package for the
+    # whole program, so it is imported here: the LangChain agent (which also uses openai underneath)
+    # would otherwise log every model call twice.
+    from langfuse.openai import OpenAI
+
     # The SDK retries rate limits (429) and server errors itself, waiting longer each time.
     client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=os.environ["OPENROUTER_API_KEY"],
                     max_retries=5)
