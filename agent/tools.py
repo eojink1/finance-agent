@@ -1,10 +1,13 @@
 """The agent's one tool: run model-written Python in a sandboxed session that keeps its variables."""
 
+import contextlib
 import json
 import select
 import subprocess
 import sys
+import threading
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -12,6 +15,10 @@ ROOT = Path(__file__).resolve().parent.parent
 SCRATCH = ROOT / "scratch"  # one subfolder per run, shared between its steps; the code runs there
 SANDBOX_DATA = "/data"  # where the code sees the dataset's files
 TIMEOUT_S = 60
+# bwrap's --die-with-parent kills the sandbox when the *thread* that started it exits (Linux ties
+# PR_SET_PDEATHSIG to the thread). LangGraph runs each tool call in a short-lived thread, so every
+# sandbox is started from this one thread instead, which lives as long as the program.
+_LAUNCHER = ThreadPoolExecutor(1, thread_name_prefix="sandbox-launcher")
 OUTPUT_CAP = 2000  # characters the model gets back
 
 
@@ -98,13 +105,19 @@ class PythonSession:
         self.scratch = scratch
         self.timeout = timeout
         self.proc = None
+        # LangGraph runs a reply's tool calls in parallel threads; one process can only answer one at a time.
+        self.lock = threading.Lock()
 
     def run(self, code: str) -> str:
-        """Run `code` and return what it printed, capped."""
+        """Run `code` and return what it printed, capped. Calls from several threads take turns."""
+        with self.lock:
+            return self._run(code)
+
+    def _run(self, code: str) -> str:
         if self.proc is None:
             self.scratch.mkdir(parents=True, exist_ok=True)
-            self.proc = subprocess.Popen(sandbox_command(self.dataset, self.scratch), text=True,
-                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+            self.proc = _LAUNCHER.submit(subprocess.Popen, sandbox_command(self.dataset, self.scratch), text=True,
+                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE).result()
         try:
             self.proc.stdin.write(json.dumps(code) + "\n")
             self.proc.stdin.flush()
@@ -124,6 +137,9 @@ class PythonSession:
         if self.proc:
             self.proc.kill()
             self.proc.wait()
+            for pipe in (self.proc.stdin, self.proc.stdout):
+                with contextlib.suppress(OSError):  # a write left in the buffer can't reach the dead process
+                    pipe.close()
             self.proc = None
 
     def __enter__(self):

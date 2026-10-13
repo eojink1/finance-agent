@@ -3,6 +3,7 @@
 import os
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from pathlib import Path
 
@@ -77,5 +78,17 @@ with PythonSession(DABSTEP, timeout=2) as s:
     # Killing the process also restarts it on the next call.
     assert "session ended" in s.run("import os; os._exit(1)")
     assert s.run("print('back')").strip() == "back"
+
+# 12. Calls from parallel threads (LangGraph runs a reply's tool calls at once) each get their own reply.
+with PythonSession(DABSTEP, timeout=10) as s, ThreadPoolExecutor(2) as pool:
+    slow, fast = pool.map(s.run, ["import time; time.sleep(1); print('slow')", "print('fast')"])
+    assert (slow.strip(), fast.strip()) == ("slow", "fast"), (slow, fast)
+
+# 13. The session survives the thread that started it (LangGraph runs each tool call in a new thread).
+with PythonSession(DABSTEP, timeout=10) as s:
+    for code, expected in [("x = 7; print('set')", "set"), ("import time; time.sleep(1); print(x)", "7")]:
+        with ThreadPoolExecutor(1) as pool:
+            out = pool.submit(s.run, code).result()
+        assert out.strip() == expected, out
 
 print("all run_python checks passed")
