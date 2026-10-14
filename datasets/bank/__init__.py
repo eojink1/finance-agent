@@ -19,6 +19,14 @@ When you are done, reply without a tool call. End the reply with one line:
 FINAL ANSWER: <answer>
 The answer must follow the question's guidelines exactly.
 
+When a question asks why spending changed, or what is worth knowing about a period, explain
+rather than describe:
+1. Compare the period with the one before it: the total first, then each category.
+2. For the categories that changed most, find the transactions behind the change and name the
+   merchants and amounts.
+3. Point out anything unusual: a recurring charge whose price changed, a refund, a large one-off
+   purchase, a charge that started or stopped.
+
 # transactions-readme.md
 {(DATA / "transactions-readme.md").read_text()}"""
 

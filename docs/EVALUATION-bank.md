@@ -87,3 +87,33 @@ Findings:
 
 Next: teach the agent what "explain" means (compare with the previous month, drill into the
 merchants behind a category change), measured on this split.
+
+## 2026-10-14 "explain rather than describe" prompt
+
+A general section in the bank system prompt (`datasets/bank/__init__.py`): for why / what's worth
+knowing questions, compare with the previous period (total, then categories), name the merchants
+behind the biggest changes, point out unusual items (price changes, refunds, one-offs, charges
+that start or stop). Nothing specific to this data.
+
+bank-why, k=3 (`runs/2026-10-14_153807_bank-why_...`), 3.5 minutes, 0 errors, 6.7 steps:
+
+| Task | Before | After |
+|---|---|---|
+| bank-why-1 (March vs February) | ✗✗✓ 0.83 | ✓✓✓ 1.00 |
+| bank-why-2 (April) | ✗✗✗ 0.11 | ✗✗✗ 0.67 |
+
+judge_score 0.47 -> 0.83, all items met 1/6 -> 3/6 runs.
+
+bank, k=1 (`runs/2026-10-14_154147_bank_...`): 20/21, unchanged; the miss is bank-18 again
+(0.00 instead of Not Applicable). 4.2 steps on average.
+
+Findings:
+
+- Keep. Every run now compares with the previous month and names the merchants: Best Buy in
+  3/3 March runs, the $488.15 drop and the Amazon refund in 3/3 April runs.
+- Netflix ($15.49 -> $17.99) is still missed in every April run. The agent sees
+  "Subscriptions +$2.50" but doesn't look inside a category that small. Not fixed by naming
+  subscriptions in the prompt: that would teach to this checklist.
+
+Next: 1-2 held-out why tasks (e.g. June, when a subscription stops) that the prompt wasn't
+written against, to check this generalizes.
