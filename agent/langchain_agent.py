@@ -10,13 +10,16 @@ import shutil
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.tools import ToolRuntime, tool
+from langchain_core.runnables import RunnableConfig
 from langchain_openai import ChatOpenAI
 from langfuse import get_client
 from langfuse.langchain import CallbackHandler
+from pydantic import SecretStr
 
 from agent.loop import MAX_STEPS, extract_answer, load_env
 from agent.tools import ROOT, SCRATCH, Dataset, PythonSession
@@ -30,13 +33,13 @@ def chat_model(model: str) -> ChatOpenAI:
     For Claude, a request-level cache_control makes OpenRouter cache the whole conversation so far
     on every call (other providers cache repeated prefixes by themselves).
     """
-    extra_body = {"usage": {"include": True}}  # OpenRouter adds the cost in USD
+    extra_body: dict[str, Any] = {"usage": {"include": True}}  # OpenRouter adds the cost in USD
     if model.startswith("anthropic/"):
         extra_body["cache_control"] = {"type": "ephemeral"}
     return ChatOpenAI(
         model=model,
         base_url=OPENROUTER_URL,
-        api_key=os.environ["OPENROUTER_API_KEY"],
+        api_key=SecretStr(os.environ["OPENROUTER_API_KEY"]),
         extra_body=extra_body,
         timeout=120,  # no timeout by default: a stalled call would hang forever
         max_retries=5,
@@ -65,7 +68,9 @@ def build_agent(model: str, dataset: Dataset):
 
     Each task's sandbox comes in as context when the agent is invoked.
     """
-    step_limit = ModelCallLimitMiddleware(run_limit=MAX_STEPS, exit_behavior="end")
+    # [Any, Context]: every middleware must declare the agent's context type, or type checkers
+    # reject the create_agent call (it runs either way).
+    step_limit = ModelCallLimitMiddleware[Any, Context](run_limit=MAX_STEPS, exit_behavior="end")
     return create_agent(
         chat_model(model),
         [run_python],
@@ -94,7 +99,7 @@ def run_agent(
     message = {"role": "user", "content": f"{question}\n\nGuidelines: {guidelines}"}
     # LangGraph counts ~4 graph steps per model call. The model-call limit is what should stop a
     # run, so this backstop sits well above it.
-    config = {"callbacks": [CallbackHandler()], "recursion_limit": 10 * MAX_STEPS}
+    config: RunnableConfig = {"callbacks": [CallbackHandler()], "recursion_limit": 10 * MAX_STEPS}
     langfuse = get_client()
     span_input = {"question": question, "guidelines": guidelines}
 
