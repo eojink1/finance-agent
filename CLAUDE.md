@@ -7,7 +7,7 @@ Architecture diagrams are in `docs/diagrams/` (regenerate with `python3 make.py`
 
 - Run a DABstep sample: `uv run python -m eval.run_eval --k 1 --tasks 5 1273 --agent langchain`
 - Run the bank set: `uv run python -m eval.run_eval --split bank --agent langchain --k 1`
-- Tests: `uv run python checks/check_tools.py && uv run python checks/check_fee_rules.py`
+- Tests: `uv run pytest` (one file: `uv run pytest tests/test_tools.py`)
 
 ## How to work in this repo
 

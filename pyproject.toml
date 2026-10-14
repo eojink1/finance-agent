@@ -10,3 +10,14 @@ dependencies = [
     "openai>=3.26.1",
     "pandas>=3.0.6",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# The project root (for agent, datasets) and the fee-rule helpers, which the sandbox imports from
+# /helpers, are importable in tests.
+pythonpath = [".", "datasets/dabstep/helpers"]

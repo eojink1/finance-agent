@@ -160,14 +160,6 @@ class PythonSession:
         self.close()
 
 
-def run_python(
-    code: str, dataset: Dataset, scratch: Path = SCRATCH / "default", timeout: float = TIMEOUT_S
-) -> str:
-    """Run `code` once in a fresh session and close it (nothing is kept)."""
-    with PythonSession(dataset, scratch, timeout) as session:
-        return session.run(code)
-
-
 def cap(output: str, limit: int = OUTPUT_CAP) -> str:
     """Keep the first `limit` characters and say how much was cut."""
     if len(output) <= limit:

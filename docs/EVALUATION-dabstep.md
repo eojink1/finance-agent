@@ -75,7 +75,7 @@ correctly at step 2, then second-guessed itself for 9 steps. Reverted.
 
 ## 2026-10-11 Fix B (tested fee-rule helpers preloaded) — kept
 
-`fee_rules.py` (checked by `checks/check_fee_rules.py`) is imported into every session; the
+`fee_rules.py` (tested by `tests/test_fee_rules.py`) is imported into every session; the
 prompt lists the helpers. Small test (`runs/2026-10-11_214640_…`): fee tasks 5/6 vs 15/27, ~3.6k
 output tokens per run vs ~16k. The miss (1273) passed one payment's facts to `matching_fee_rules`
 for a question about rules in general.
@@ -173,7 +173,7 @@ What the abstraction hid:
   crashed at ~20 calls. When the call limit stops a run, its "Model call limits exceeded" message
   must not be read as the answer.
 - **A reply's tool calls run in parallel threads:** two threads on one sandbox could swap replies
-  and hang. `PythonSession.run` now takes a lock (`checks/check_tools.py` #12).
+  and hang. `PythonSession.run` now takes a lock (`test_parallel_calls_each_get_their_own_reply`).
 - **The sandbox died with the thread that started it** (bwrap's `--die-with-parent` is per
   thread), so every second call failed. Sandboxes now start from one long-lived thread
-  (`checks/check_tools.py` #13): 0 failed calls, 6.7 → 4.1 steps.
+  (`test_session_survives_the_thread_that_started_it`): 0 failed calls, 6.7 → 4.1 steps.
