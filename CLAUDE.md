@@ -8,7 +8,7 @@ Architecture diagrams are in `docs/diagrams/` (regenerate with `python3 make.py`
 - Explain a new concept (how it works, why it helps here) before implementing it. If the user
   doesn't follow, re-explain from scratch with one concrete example and no jargon.
 - Measure every agent or prompt change on DABstep before keeping it; log results in
-  `docs/EVALUATION.md`. Prefer deleting changes that don't help.
+  `docs/EVALUATION-dabstep.md` (bank: `docs/EVALUATION-bank.md`). Prefer deleting changes that don't help.
 - Check model prices before picking a model; iterate on small samples, not full runs.
 - Don't commit until the user has reviewed the change.
 - One idea per change, ideally under ~50 lines of diff, so the user can review each before the

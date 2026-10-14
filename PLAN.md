@@ -102,7 +102,7 @@ An investigation loop with a DABstep score. No database, no framework, no UI.
 - **Phase 2 additions:** own golden questions on synthetic transactions, prompt-injection tests
   (transaction text trying to steer the agent), memory tests (~15 cross-session cases plus
   poisoning cases), verifier fixes vs breaks.
-- Every change is measured before it is kept; results are logged in `docs/EVALUATION.md`.
+- Every change is measured before it is kept; results are logged in `docs/EVALUATION-dabstep.md` and `docs/EVALUATION-bank.md`.
 
 ## Costs (OpenRouter prices on 2026-10-08)
 
