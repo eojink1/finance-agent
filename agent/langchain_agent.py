@@ -3,15 +3,17 @@
 Same inputs and result as agent.loop.run_agent, so the eval can run either and compare them.
 """
 
+import functools
 import json
 import os
 import shutil
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import ModelCallLimitMiddleware
-from langchain_core.tools import tool
+from langchain.tools import ToolRuntime, tool
 from langchain_openai import ChatOpenAI
 from langfuse import get_client
 from langfuse.langchain import CallbackHandler
@@ -31,6 +33,29 @@ def chat_model(model: str) -> ChatOpenAI:
                       timeout=120, max_retries=5)  # no timeout by default: a stalled call would hang forever
 
 
+@dataclass
+class Context:
+    """What each task passes to agent.invoke(context=...); tools read it from runtime.context."""
+    python: PythonSession  # this task's sandbox
+
+
+# LangChain fills in `runtime` on each call and hides it from the model, which sees only `code`.
+@tool
+def run_python(code: str, runtime: ToolRuntime[Context]) -> str:
+    """Run Python code and return what it printed (stdout and stderr, cut to 2,000 characters).
+    Like a notebook: variables, imports and loaded data stay available in later calls, so load
+    each file once and reuse it. pandas is installed."""
+    return runtime.context.python.run(code)
+
+
+@functools.cache
+def build_agent(model: str, dataset: Dataset):
+    """One agent per model and dataset, reused by every task; each task's sandbox comes in as context."""
+    return create_agent(chat_model(model), [run_python], system_prompt=dataset.system_prompt(),
+                        middleware=[ModelCallLimitMiddleware(run_limit=MAX_STEPS, exit_behavior="end")],
+                        context_schema=Context)
+
+
 def run_agent(question: str, guidelines: str, model: str, dataset: Dataset, trace_path: Path | None = None,
               scratch: Path = SCRATCH / "default") -> dict:
     """Run one task in an empty `scratch` folder. Returns the answer plus step, token, cost and time counts."""
@@ -41,18 +66,11 @@ def run_agent(question: str, guidelines: str, model: str, dataset: Dataset, trac
     with (PythonSession(dataset, scratch) as python,
           get_client().start_as_current_observation(name="agent", as_type="agent",
                                                     input={"question": question, "guidelines": guidelines}) as span):
-        @tool
-        def run_python(code: str) -> str:
-            """Run Python code and return what it printed (stdout and stderr, cut to 2,000 characters).
-            Like a notebook: variables, imports and loaded data stay available in later calls, so load
-            each file once and reuse it. pandas is installed."""
-            return python.run(code)
-
-        agent = create_agent(chat_model(model), [run_python], system_prompt=dataset.system_prompt(),
-                             middleware=[ModelCallLimitMiddleware(run_limit=MAX_STEPS, exit_behavior="end")])
+        agent = build_agent(model, dataset)
         state = agent.invoke({"messages": [{"role": "user", "content": f"{question}\n\nGuidelines: {guidelines}"}]},
-                             config={"callbacks": [CallbackHandler()], "recursion_limit": 10 * MAX_STEPS})  # LangGraph counts ~4 graph steps per model call; the
-        # call limit above is what should stop a run, so this backstop sits well above it
+                             config={"callbacks": [CallbackHandler()], "recursion_limit": 10 * MAX_STEPS},  # LangGraph counts ~4 graph steps per model call; the
+                             # call limit above is what should stop a run, so this backstop sits well above it
+                             context=Context(python=python))
 
         # Only the model's own replies carry token usage; the call limit adds an AI message without it.
         replies = [m for m in state["messages"] if m.type == "ai" and m.usage_metadata]
