@@ -19,11 +19,9 @@ from langfuse import get_client, propagate_attributes
 from agent import langchain_agent, loop
 from agent.loop import load_env
 from agent.tools import ROOT, SCRATCH, Dataset
-from datasets.bank import BANK
-from datasets.dabstep import DABSTEP
+from datasets import DATASETS, load_tasks
 
 AGENTS = {"plain": loop.run_agent, "langchain": langchain_agent.run_agent}
-DATASETS = {"dev": DABSTEP, "all": DABSTEP, "bank": BANK}
 MARKS = {True: "✓", False: "✗", None: "?"}  # ? = no public answer to score against
 
 # scorer.py is the leaderboard's own file, downloaded into data/ (not part of this repo).
@@ -112,7 +110,7 @@ def main():
     )
     parser.add_argument(
         "--split",
-        choices=["dev", "all", "bank"],
+        choices=list(DATASETS),
         default="dev",
         help="10 DABstep dev tasks, all 450, or the 21 bank questions",
     )
@@ -121,8 +119,7 @@ def main():
     load_env()
     model = args.model or os.environ["MODEL"]
     dataset = DATASETS[args.split]
-    with open(ROOT / "data" / "tasks" / f"{args.split}.jsonl") as f:
-        tasks = [json.loads(line) for line in f]
+    tasks = load_tasks(args.split)
     if args.tasks:
         tasks = [t for t in tasks if str(t["task_id"]) in args.tasks]
 

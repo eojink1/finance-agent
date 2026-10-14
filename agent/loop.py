@@ -172,23 +172,23 @@ def extract_answer(text: str) -> str:
 
 
 if __name__ == "__main__":
-    # Run one dev task by hand: uv run python -m agent.loop [task_id] [--model M]
+    # Run one task by hand: uv run python -m agent.loop [task_id] [--split S] [--model M]
     import argparse
 
-    from datasets.dabstep import DABSTEP
+    from datasets import DATASETS, load_tasks
 
     load_env()  # first, so the --model default can read MODEL from .env
-    parser = argparse.ArgumentParser(description="Run one DABstep dev task with the plain loop.")
-    parser.add_argument("task_id", nargs="?", default="5", help="dev task id (default: 5)")
+    parser = argparse.ArgumentParser(description="Run one task with the plain loop.")
+    parser.add_argument("task_id", nargs="?", default="5", help="task id (default: 5)")
+    parser.add_argument("--split", choices=list(DATASETS), default="dev", help="default: dev")
     parser.add_argument("--model", default=os.environ["MODEL"], help="default: MODEL from .env")
     args = parser.parse_args()
 
-    with open(ROOT / "data" / "tasks" / "dev.jsonl") as f:
-        tasks = [json.loads(line) for line in f]
-    task = next(t for t in tasks if t["task_id"] == args.task_id)
+    task = next(t for t in load_tasks(args.split) if t["task_id"] == args.task_id)
+    dataset = DATASETS[args.split]
     (ROOT / "runs").mkdir(exist_ok=True)
     trace_path = ROOT / "runs" / f"task_{args.task_id}.jsonl"
-    result = run_agent(task["question"], task["guidelines"], args.model, DABSTEP, trace_path)
+    result = run_agent(task["question"], task["guidelines"], args.model, dataset, trace_path)
     print(json.dumps(result, indent=2))
     print("expected:", task["answer"])
     print("trace:", trace_path)
