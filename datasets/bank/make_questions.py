@@ -21,11 +21,12 @@ APPLICABLE = (
 MONEY = "Answer must be just a number rounded to 2 decimals, without a currency sign."
 MONTH = "Answer must be just the month's full English name."
 MERCHANT = "Answer must be just the merchant text exactly as in the description column."
+NOT_SPENDING = ["Income", "Transfer", "Credit Card Payment"]
 
 
 def spending(df: pd.DataFrame) -> float:
-    """The readme's definition: money out minus refunds, outside Income and Transfer, positive."""
-    return -df[~df.category.isin(["Income", "Transfer"])].amount.sum()
+    """The readme's definition: money out minus refunds, outside NOT_SPENDING, positive."""
+    return -df[~df.category.isin(NOT_SPENDING)].amount.sum()
 
 
 def in_month(df: pd.DataFrame, month: int) -> pd.DataFrame:
@@ -42,7 +43,7 @@ def month_name(m: int) -> str:
 
 def answers(df: pd.DataFrame) -> list[tuple[str, str, str, str]]:
     """(level, question, guidelines, answer) for each task."""
-    spend = df[~df.category.isin(["Income", "Transfer"])]
+    spend = df[~df.category.isin(NOT_SPENDING)]
     feb, mar, apr, may = in_month(df, 2), in_month(df, 3), in_month(df, 4), in_month(df, 5)
 
     subs = df[df.category == "Subscriptions"]
@@ -56,7 +57,7 @@ def answers(df: pd.DataFrame) -> list[tuple[str, str, str, str]]:
     feb_by_category = -feb.groupby("category").amount.sum()
     mar_by_category = -mar.groupby("category").amount.sum()
     change = mar_by_category.sub(feb_by_category, fill_value=0)
-    change = change.drop(["Income", "Transfer"], errors="ignore")
+    change = change.drop(NOT_SPENDING, errors="ignore")
     largest = spend[spend.category != "Housing"].sort_values("amount").iloc[0]
     groceries = -df[df.category == "Groceries"].groupby("description").amount.sum()
     q1_groceries = df[(df.category == "Groceries") & (df.date.dt.month <= 3)]

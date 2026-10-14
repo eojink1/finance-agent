@@ -5,6 +5,10 @@ uv run python -m datasets.bank.make_data
 Same seed, same file. The patterns the questions probe are planted on purpose: a one-off
 purchase in March, a Netflix price rise in April, Hulu cancelled after February, a refunded
 Amazon order, monthly transfers to savings, and no travel at all.
+
+Traps (mess real exports have, added one at a time):
+- Card autopay: each month checking pays last month's card bill, and both accounts show it.
+  Summing money out naively counts every card purchase twice.
 """
 
 import csv
@@ -67,6 +71,21 @@ def transactions(rng: random.Random) -> list[tuple]:
     add(date(2026, 3, 14), "BEST BUY 00123", -549.99, "Shopping")
     add(date(2026, 4, 8), "AMAZON.COM*RT4KX", -89.99, "Shopping")
     add(date(2026, 4, 15), "AMAZON.COM*RT4KX REFUND", 89.99, "Shopping")
+
+    # Last month's card bill is paid from checking on the 25th. June's bill is paid in July,
+    # after the export ends.
+    for month in range(START.month + 1, END.month + 1):
+        last_month_card = [
+            amount
+            for d, _, amount, category, account in rows
+            if account == "credit card"
+            and d.month == month - 1
+            and category != "Credit Card Payment"
+        ]
+        bill = -sum(last_month_card)
+        payday = date(2026, month, 25)
+        add(payday, "CHASE CARD AUTOPAY", -bill, "Credit Card Payment", "checking")
+        add(payday, "AUTOPAY PAYMENT - THANK YOU", bill, "Credit Card Payment")
     return sorted(rows)
 
 
