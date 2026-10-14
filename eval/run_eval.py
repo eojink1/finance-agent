@@ -4,6 +4,7 @@ uv run python -m eval.run_eval --k 3            # 10 dev tasks
 uv run python -m eval.run_eval --k 1 --tasks 5 1273
 uv run python -m eval.run_eval --k 1 --split all  # all 450 tasks; writes submission.jsonl
 uv run python -m eval.run_eval --k 1 --split bank  # 21 bank questions
+uv run python -m eval.run_eval --k 3 --split bank-why  # open-ended bank tasks, LLM-judged
 """
 
 import argparse
@@ -19,6 +20,7 @@ from langfuse import get_client, propagate_attributes
 from agent.langchain_agent import load_env, run_agent
 from agent.tools import ROOT, SCRATCH, Dataset
 from datasets import DATASETS, load_tasks
+from eval.judge import judge
 
 MARKS = {True: "✓", False: "✗", None: "?"}  # ? = no public answer to score against
 
@@ -32,6 +34,7 @@ def run_one(task: dict, run: int, model: str, dataset: Dataset, out_dir) -> dict
     """One attempt at one task. API failures count as wrong, so the eval keeps going."""
     name = f"task_{task['task_id']}_run{run}"
     expected = task["answer"]  # empty for the 440 test tasks: those are scored only by submission
+    checklist = task.get("checklist")  # open-ended bank tasks: eval/judge.py scores these
     row = {"task_id": task["task_id"], "level": task["level"], "run": run, "expected": expected}
 
     # In Langfuse: one session per eval, one trace per run, tagged and scored.
@@ -56,12 +59,24 @@ def run_one(task: dict, run: int, model: str, dataset: Dataset, out_dir) -> dict
                 trace_id=result["trace_id"],
                 comment=f"expected {expected!r}",
             )
+        elif checklist:
+            answer = result["answer"] or ""
+            verdict = judge(task["question"], answer, checklist)
+            row["score"] = verdict.score
+            row["verdicts"] = [item.model_dump() for item in verdict.items]
+            # A run counts as correct only if it makes every point on the checklist.
+            row["correct"] = verdict.score == 1
         else:
             row["correct"] = None
     except Exception as e:
-        row |= {"answer": None, "correct": False if expected else None, "error": repr(e)}
+        has_key = bool(expected or checklist)
+        row |= {"answer": None, "correct": False if has_key else None, "error": repr(e)}
 
     line = f"  {name}: {MARKS[row['correct']]} {row['answer']!r} (expected {expected!r})"
+    if "score" in row:
+        line = f"  {name}: {MARKS[row['correct']]} score {row['score']:.2f}"
+        for item in row["verdicts"]:
+            line += f"\n      {MARKS[item['met']]} {item['item']}: {item['reason']}"
     if "error" in row:
         line += f" ERROR {row['error']}"
     print(line, flush=True)
@@ -73,15 +88,18 @@ def summarize(rows: list[dict], tasks: list[dict], k: int) -> dict:
     ok = [r for r in rows if "error" not in r]
     runs_by_task = {}
     for t in tasks:
-        if t["answer"]:
+        if t["answer"] or t.get("checklist"):
             runs_by_task[t["task_id"]] = [r for r in rows if r["task_id"] == t["task_id"]]
     all_runs_correct = [all(r["correct"] for r in runs) for runs in runs_by_task.values()]
+
+    judged = [r["score"] for r in rows if "score" in r]
 
     def total(key: str) -> float:
         return sum(r.get(key, 0) for r in rows)
 
     return {
         "accuracy": sum(r["correct"] for r in scored) / len(scored) if scored else None,
+        "judge_score": sum(judged) / len(judged) if judged else None,
         "scored_runs": len(scored),
         f"pass^{k}": sum(all_runs_correct),
         "tasks": len(tasks),
@@ -107,7 +125,7 @@ def main():
         "--split",
         choices=list(DATASETS),
         default="dev",
-        help="10 DABstep dev tasks, all 450, or the 21 bank questions",
+        help="10 DABstep dev tasks, all 450, the 21 bank questions, or the open-ended bank tasks",
     )
     args = parser.parse_args()
 

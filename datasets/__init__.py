@@ -6,7 +6,7 @@ from agent.tools import ROOT
 from datasets.bank import BANK
 from datasets.dabstep import DABSTEP
 
-DATASETS = {"dev": DABSTEP, "all": DABSTEP, "bank": BANK}
+DATASETS = {"dev": DABSTEP, "all": DABSTEP, "bank": BANK, "bank-why": BANK}
 
 
 def load_tasks(split: str) -> list[dict]:

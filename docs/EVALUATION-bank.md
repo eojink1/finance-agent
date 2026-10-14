@@ -58,3 +58,32 @@ Findings:
   arguably fair.
 
 Next: a mess the readme does not spell out, merchant name variants (AMZN Mktp, Amazon.com*).
+
+## 2026-10-14 open-ended baseline (bank-why, LLM-judged)
+
+Two "explain my spending" tasks in `data/tasks/bank-why.jsonl` (`datasets/bank/make_reports.py`),
+each scored by `eval/judge.py` (Claude Haiku 5.5) against a checklist of the causes planted in the
+data. Agent unchanged. Traces:
+`runs/2026-10-14_151653_bank-why_langchain_nvidia_nemotron-3-super-120b-a12b_free`. k=3,
+3.2 minutes, 0 errors, 6.5 steps on average.
+
+| Task | Question | Runs | Avg score |
+|---|---|---|---|
+| bank-why-1 | Why did I spend more in March than in February? (4 items) | ✗✗✓ | 0.83 |
+| bank-why-2 | Anything I should know about my spending in April? (3 items) | ✗✗✗ | 0.11 |
+
+judge_score 0.47, all items met in 1/6 runs, pass^3 0/2.
+
+Findings:
+
+- The judge is right: all 18 verdicts agree with reading the answers myself. It accepts
+  "Transportation" for gas because the checklist item names both.
+- When the question names the comparison (March vs February), the agent finds it: total, Dining
+  and Transportation in every run. It stops at the category, though: only 1/3 runs named the
+  Best Buy purchase behind Shopping +$549.99.
+- "Anything I should know?" gets a description, not a finding: every run listed April's
+  categories and income, none compared with March, none noticed Netflix rose to $17.99. The
+  refund was mentioned 2/3 times, with Amazon named once.
+
+Next: teach the agent what "explain" means (compare with the previous month, drill into the
+merchants behind a category change), measured on this split.
