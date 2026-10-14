@@ -106,7 +106,7 @@ def answers(df: pd.DataFrame) -> list[tuple[str, str, str, str]]:
          " highest spending?",
          MONTH,
          month_name(by_month(df.drop(largest.name)).idxmax())),
-        ("easy", "How much did I spend on travel in May 2026?", MONEY, NA),
+        ("easy", "How much did I spend on flights and hotels in May 2026?", MONEY, NA),
         ("easy", "What was my total spending in December 2025?", MONEY, NA),
         ("hard", "What interest rate does my credit card charge?",
          "Answer must be just a percentage rounded to 2 decimals, without a % sign.", NA),

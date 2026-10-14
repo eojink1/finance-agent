@@ -29,6 +29,8 @@ Findings:
 
 - 20/21 (k=1). The miss, bank-18, is a question flaw: the agent read "travel" as Transportation
   (gas). Reword the question or say in the readme there is no travel category.
+  2026-10-14: reworded to "flights and hotels"; bank-18 alone now answers Not Applicable
+  (`runs/2026-10-14_112511_bank_...`, k=1, 4 steps).
 - Too easy to steer by: 4.3 steps on average with a free model. Rows are correctly categorized,
   merchant names never vary, the readme defines every term.
 
