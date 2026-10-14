@@ -17,6 +17,7 @@ Architecture diagrams are in `docs/diagrams/` (regenerate with `python3 make.py`
   `docs/EVALUATION-dabstep.md` (bank: `docs/EVALUATION-bank.md`). Prefer deleting changes that don't help.
 - Check model prices before picking a model; iterate on small samples, not full runs.
 - Don't commit until the user has reviewed the change.
+- Run `uv run pytest` before every commit; don't commit with failing tests.
 - One idea per change, ideally under ~50 lines of diff, so the user can review each before the
   next starts. This limits scope, not density. Never compress code to fit under it.
   Don't stack unreviewed changes.
