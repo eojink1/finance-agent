@@ -5,7 +5,7 @@ answers are computed from them (`datasets/bank/make_questions.py`), scored with 
 `scorer.py`. DABstep results are in `EVALUATION-dabstep.md`.
 
 Regenerate, then run: `uv run python -m datasets.bank.make_data && uv run python -m datasets.bank.make_questions`,
-then `uv run python -m eval.run_eval --split bank --agent langchain --k 1`.
+then `uv run python -m eval.run_eval --split bank --k 1`.
 
 The data changes as it is made messier, so each run names the commit of `datasets/bank/` it used.
 Scores are comparable only between runs on the same data.

@@ -3,7 +3,7 @@
 uv run python -m eval.run_eval --k 3            # 10 dev tasks
 uv run python -m eval.run_eval --k 1 --tasks 5 1273
 uv run python -m eval.run_eval --k 1 --split all  # all 450 tasks; writes submission.jsonl
-uv run python -m eval.run_eval --k 1 --split bank --agent langchain  # 21 bank questions
+uv run python -m eval.run_eval --k 1 --split bank  # 21 bank questions
 """
 
 import argparse
@@ -16,12 +16,10 @@ from datetime import datetime
 
 from langfuse import get_client, propagate_attributes
 
-from agent import langchain_agent, loop
-from agent.loop import load_env
+from agent.langchain_agent import load_env, run_agent
 from agent.tools import ROOT, SCRATCH, Dataset
 from datasets import DATASETS, load_tasks
 
-AGENTS = {"plain": loop.run_agent, "langchain": langchain_agent.run_agent}
 MARKS = {True: "✓", False: "✗", None: "?"}  # ? = no public answer to score against
 
 # scorer.py is the leaderboard's own file, downloaded into data/ (not part of this repo).
@@ -30,21 +28,21 @@ scorer = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(scorer)
 
 
-def run_one(task: dict, run: int, model: str, agent: str, dataset: Dataset, out_dir) -> dict:
+def run_one(task: dict, run: int, model: str, dataset: Dataset, out_dir) -> dict:
     """One attempt at one task. API failures count as wrong, so the eval keeps going."""
     name = f"task_{task['task_id']}_run{run}"
     expected = task["answer"]  # empty for the 440 test tasks: those are scored only by submission
     row = {"task_id": task["task_id"], "level": task["level"], "run": run, "expected": expected}
 
     # In Langfuse: one session per eval, one trace per run, tagged and scored.
-    metadata = {"task_id": str(task["task_id"]), "run": str(run), "model": model, "agent": agent}
+    metadata = {"task_id": str(task["task_id"]), "run": str(run), "model": model}
     trace_path = out_dir / f"{name}.jsonl"
     scratch = SCRATCH / out_dir.name / name
     try:
         with propagate_attributes(
             session_id=out_dir.name, trace_name=name, tags=[task["level"]], metadata=metadata
         ):
-            result = AGENTS[agent](
+            result = run_agent(
                 task["question"], task["guidelines"], model, dataset, trace_path, scratch
             )
         row |= result
@@ -106,9 +104,6 @@ def main():
     )
     parser.add_argument("--model", help="default: MODEL from .env")
     parser.add_argument(
-        "--agent", choices=list(AGENTS), default="plain", help="hand-written loop or LangChain"
-    )
-    parser.add_argument(
         "--split",
         choices=list(DATASETS),
         default="dev",
@@ -125,13 +120,13 @@ def main():
 
     timestamp = f"{datetime.now():%Y-%m-%d_%H%M%S}"
     model_name = model.replace("/", "_").replace(":", "_")
-    out_dir = ROOT / "runs" / f"{timestamp}_{args.split}_{args.agent}_{model_name}"
+    out_dir = ROOT / "runs" / f"{timestamp}_{args.split}_langchain_{model_name}"
     out_dir.mkdir(parents=True)
-    print(f"{len(tasks)} tasks x {args.k} runs on {model} ({args.agent} agent) -> {out_dir}")
+    print(f"{len(tasks)} tasks x {args.k} runs on {model} -> {out_dir}")
 
     def run_job(job: tuple[dict, int]) -> dict:
         task, run = job
-        return run_one(task, run, model, args.agent, dataset, out_dir)
+        return run_one(task, run, model, dataset, out_dir)
 
     start = time.time()
     jobs = [(t, run) for run in range(1, args.k + 1) for t in tasks]
@@ -139,7 +134,7 @@ def main():
         rows = list(pool.map(run_job, jobs))
     minutes = round((time.time() - start) / 60, 1)
 
-    summary = {"model": model, "agent": args.agent, "k": args.k, "minutes": minutes}
+    summary = {"model": model, "k": args.k, "minutes": minutes}
     summary |= summarize(rows, tasks, args.k)
     get_client().flush()
     (out_dir / "summary.json").write_text(json.dumps({"summary": summary, "rows": rows}, indent=2))

@@ -1,4 +1,9 @@
-"""The agent loop: ask the model, run the code it asks for, repeat until it answers."""
+"""Archived 2026-10-14: the phase 1 hand-written agent loop, replaced by agent/langchain_agent.py.
+
+Ask the model, run the code it asks for, repeat until it answers. 68.9% on the DABstep leaderboard
+(2026-10-12). Kept for reference; not used by the eval and not tested.
+Still runs by hand: uv run python -m archive.plain_loop [task_id] [--split S] [--model M]
+"""
 
 import json
 import os
@@ -172,7 +177,7 @@ def extract_answer(text: str) -> str:
 
 
 if __name__ == "__main__":
-    # Run one task by hand: uv run python -m agent.loop [task_id] [--split S] [--model M]
+    # Run one task by hand: uv run python -m archive.plain_loop [task_id] [--split S] [--model M]
     import argparse
 
     from datasets import DATASETS, load_tasks

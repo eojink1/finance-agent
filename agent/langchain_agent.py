@@ -1,6 +1,6 @@
 """The agent, built with LangChain: create_agent runs the ask-model / run-tool / repeat cycle.
 
-Same inputs and result as agent.loop.run_agent, so the eval can run either and compare them.
+It replaced the hand-written loop, archived in archive/plain_loop.py.
 """
 
 import functools
@@ -21,10 +21,18 @@ from langfuse import get_client
 from langfuse.langchain import CallbackHandler
 from pydantic import SecretStr
 
-from agent.loop import MAX_STEPS, extract_answer, load_env
 from agent.tools import ROOT, SCRATCH, Dataset, PythonSession
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1"
+MAX_STEPS = 20  # model calls per task
+
+
+def load_env(path: Path = ROOT / ".env") -> None:
+    """Read KEY=value lines from .env into os.environ (no extra dependency)."""
+    for line in path.read_text().splitlines():
+        if "=" in line and not line.startswith("#"):
+            key, value = line.split("=", 1)
+            os.environ.setdefault(key.strip(), value.strip())
 
 
 def chat_model(model: str) -> ChatOpenAI:
@@ -141,6 +149,17 @@ def summarize(messages: list) -> dict:
 def cost(reply) -> float:
     """USD cost OpenRouter reported for one model call (0 if it didn't)."""
     return reply.response_metadata.get("token_usage", {}).get("cost") or 0
+
+
+def extract_answer(text: str) -> str:
+    """Take what follows the last 'FINAL ANSWER:'; fall back to the whole reply.
+
+    Markdown around the answer is dropped: '**FINAL ANSWER:** 0.12' gives '0.12'.
+    """
+    marker = "FINAL ANSWER:"
+    if marker in text:
+        text = text.rsplit(marker, 1)[1]
+    return text.strip().strip("*`").strip()
 
 
 def write_trace(path: Path, messages: list, result: dict) -> None:
