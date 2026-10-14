@@ -38,17 +38,29 @@ def load_env(path: Path = ROOT / ".env") -> None:
             os.environ.setdefault(key.strip(), value.strip())
 
 
-def run_agent(question: str, guidelines: str, model: str, dataset: Dataset, trace_path: Path | None = None,
-              scratch: Path = SCRATCH / "default") -> dict:
-    """Run one task in an empty `scratch` folder. Returns the answer plus step, token, cost and time counts."""
+def run_agent(
+    question: str,
+    guidelines: str,
+    model: str,
+    dataset: Dataset,
+    trace_path: Path | None = None,
+    scratch: Path = SCRATCH / "default",
+) -> dict:
+    """Run one task in an empty `scratch` folder.
+
+    Returns the answer plus step, token, cost and time counts.
+    """
     # Langfuse's OpenAI client traces each call, but importing it patches the openai package for the
     # whole program, so it is imported here: the LangChain agent (which also uses openai underneath)
     # would otherwise log every model call twice.
     from langfuse.openai import OpenAI
 
     # The SDK retries rate limits (429) and server errors itself, waiting longer each time.
-    client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=os.environ["OPENROUTER_API_KEY"],
-                    max_retries=5)
+    client = OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=os.environ["OPENROUTER_API_KEY"],
+        max_retries=5,
+    )
     messages = [
         {"role": "system", "content": dataset.system_prompt()},
         {"role": "user", "content": f"{question}\n\nGuidelines: {guidelines}"},
@@ -59,10 +71,14 @@ def run_agent(question: str, guidelines: str, model: str, dataset: Dataset, trac
     start = time.time()
 
     langfuse = get_client()
-    with (open(trace_path or os.devnull, "w") as trace,
-          PythonSession(dataset, scratch) as python,
-          langfuse.start_as_current_observation(name="agent", as_type="agent",
-                                                input={"question": question, "guidelines": guidelines}) as span):
+    span_input = {"question": question, "guidelines": guidelines}
+    with (
+        open(trace_path or os.devnull, "w") as trace,
+        PythonSession(dataset, scratch) as python,
+        langfuse.start_as_current_observation(
+            name="agent", as_type="agent", input=span_input
+        ) as span,
+    ):
         def log(**event):
             trace.write(json.dumps(event) + "\n")
             trace.flush()
@@ -71,21 +87,25 @@ def run_agent(question: str, guidelines: str, model: str, dataset: Dataset, trac
         try:
             for step in range(1, MAX_STEPS + 1):
                 response = client.chat.completions.create(
-                    model=model, messages=with_cache_marks(messages, model), tools=TOOLS,
+                    model=model,
+                    messages=with_cache_marks(messages, model),
+                    tools=TOOLS,
                     extra_body={"usage": {"include": True}},  # OpenRouter adds the cost in USD
                 )
                 add_usage(usage, response.usage)
                 reply = response.choices[0].message
                 messages.append(reply.model_dump(exclude_none=True))
-                log(step=step, role="assistant", content=reply.content,
-                    tool_calls=[c.function.arguments for c in reply.tool_calls or []])
+                tool_calls = [c.function.arguments for c in reply.tool_calls or []]
+                log(step=step, role="assistant", content=reply.content, tool_calls=tool_calls)
 
                 if not reply.tool_calls:  # no tool call: the model is done
                     answer = extract_answer(reply.content or "")
                     break
 
                 for call in reply.tool_calls:
-                    with langfuse.start_as_current_observation(name="run_python", as_type="tool") as tool:
+                    with langfuse.start_as_current_observation(
+                        name="run_python", as_type="tool"
+                    ) as tool:
                         try:
                             code = json.loads(call.function.arguments)["code"]
                             output = python.run(code)
@@ -99,7 +119,8 @@ def run_agent(question: str, guidelines: str, model: str, dataset: Dataset, trac
             log(error=repr(e), **usage)
             raise
 
-        result = {"answer": answer, "steps": step, "seconds": round(time.time() - start, 1), **usage}
+        seconds = round(time.time() - start, 1)
+        result = {"answer": answer, "steps": step, "seconds": seconds, **usage}
         log(**result)
         span.update(output=result)
         result["trace_id"] = langfuse.get_current_trace_id()  # lets the eval attach a score
@@ -119,8 +140,10 @@ def with_cache_marks(messages: list[dict], model: str) -> list[dict]:
     for i in {0, len(marked) - 1}:  # the system prompt, and the newest message
         message = dict(marked[i])
         if isinstance(message.get("content"), str) and message["content"]:
-            message["content"] = [{"type": "text", "text": message["content"],
-                                   "cache_control": {"type": "ephemeral"}}]
+            text = message["content"]
+            message["content"] = [
+                {"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}
+            ]
             marked[i] = message
     return marked
 
@@ -132,7 +155,8 @@ def add_usage(total: dict, usage) -> None:
     total["input_tokens"] += usage.prompt_tokens
     total["output_tokens"] += usage.completion_tokens
     details = usage.prompt_tokens_details
-    total["cached_tokens"] += (details and details.cached_tokens) or 0
+    if details and details.cached_tokens:
+        total["cached_tokens"] += details.cached_tokens
     total["cost"] += getattr(usage, "cost", None) or 0.0  # OpenRouter's extra field
 
 
@@ -148,17 +172,23 @@ def extract_answer(text: str) -> str:
 
 
 if __name__ == "__main__":
-    # Run one dev task by hand: uv run python -m agent.loop <task_id>
-    import sys
+    # Run one dev task by hand: uv run python -m agent.loop [task_id] [--model M]
+    import argparse
 
-    load_env()
-    task_id = sys.argv[1] if len(sys.argv) > 1 else "5"
-    tasks = [json.loads(l) for l in open(ROOT / "data" / "tasks" / "dev.jsonl")]
-    task = next(t for t in tasks if str(t["task_id"]) == task_id)
-    (ROOT / "runs").mkdir(exist_ok=True)
-    trace_path = ROOT / "runs" / f"task_{task_id}.jsonl"
     from datasets.dabstep import DABSTEP
-    result = run_agent(task["question"], task["guidelines"], os.environ["MODEL"], DABSTEP, trace_path)
+
+    load_env()  # first, so the --model default can read MODEL from .env
+    parser = argparse.ArgumentParser(description="Run one DABstep dev task with the plain loop.")
+    parser.add_argument("task_id", nargs="?", default="5", help="dev task id (default: 5)")
+    parser.add_argument("--model", default=os.environ["MODEL"], help="default: MODEL from .env")
+    args = parser.parse_args()
+
+    with open(ROOT / "data" / "tasks" / "dev.jsonl") as f:
+        tasks = [json.loads(line) for line in f]
+    task = next(t for t in tasks if t["task_id"] == args.task_id)
+    (ROOT / "runs").mkdir(exist_ok=True)
+    trace_path = ROOT / "runs" / f"task_{args.task_id}.jsonl"
+    result = run_agent(task["question"], task["guidelines"], args.model, DABSTEP, trace_path)
     print(json.dumps(result, indent=2))
     print("expected:", task["answer"])
     print("trace:", trace_path)

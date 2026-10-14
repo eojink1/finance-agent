@@ -1,10 +1,12 @@
-"""Fails loudly if run_python's safety limits break. Run: uv run python checks/check_tools.py"""
+"""Fails loudly if run_python's safety limits break.
+
+Run: uv run python checks/check_tools.py
+"""
 
 import os
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
-from functools import partial
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -12,7 +14,12 @@ from agent import tools
 from agent.tools import OUTPUT_CAP, ROOT, SCRATCH, PythonSession
 from datasets.dabstep import DABSTEP, DATA
 
-run_python = partial(tools.run_python, dataset=DABSTEP)
+
+
+def run_python(code: str, **options) -> str:
+    """run_python on the DABstep dataset, in a fresh session each call."""
+    return tools.run_python(code, dataset=DABSTEP, **options)
+
 
 # 1. Normal code: output comes back.
 assert run_python("print(1 + 1)").strip() == "2"
@@ -45,7 +52,8 @@ assert run_python("print(open('note.txt').read())").strip() == "kept"
 
 # 7. pandas and the data are available.
 assert run_python("import pandas; print('ok')").strip() == "ok"
-assert "(138236, 21)" in run_python("import pandas as pd; print(pd.read_csv('/data/payments.csv').shape)")
+out = run_python("import pandas as pd; print(pd.read_csv('/data/payments.csv').shape)")
+assert "(138236, 21)" in out, out
 
 # 8. Sandbox: the home folder and the project (including .env) are invisible.
 for path in [Path.home(), Path.home() / ".ssh", ROOT / ".env"]:
@@ -79,14 +87,18 @@ with PythonSession(DABSTEP, timeout=2) as s:
     assert "session ended" in s.run("import os; os._exit(1)")
     assert s.run("print('back')").strip() == "back"
 
-# 12. Calls from parallel threads (LangGraph runs a reply's tool calls at once) each get their own reply.
+# 12. Calls from parallel threads (LangGraph runs a reply's tool calls at once) each get their
+# own reply.
 with PythonSession(DABSTEP, timeout=10) as s, ThreadPoolExecutor(2) as pool:
-    slow, fast = pool.map(s.run, ["import time; time.sleep(1); print('slow')", "print('fast')"])
+    codes = ["import time; time.sleep(1); print('slow')", "print('fast')"]
+    slow, fast = pool.map(s.run, codes)
     assert (slow.strip(), fast.strip()) == ("slow", "fast"), (slow, fast)
 
-# 13. The session survives the thread that started it (LangGraph runs each tool call in a new thread).
+# 13. The session survives the thread that started it (LangGraph runs each tool call in a new
+# thread).
+calls = [("x = 7; print('set')", "set"), ("import time; time.sleep(1); print(x)", "7")]
 with PythonSession(DABSTEP, timeout=10) as s:
-    for code, expected in [("x = 7; print('set')", "set"), ("import time; time.sleep(1); print(x)", "7")]:
+    for code, expected in calls:
         with ThreadPoolExecutor(1) as pool:
             out = pool.submit(s.run, code).result()
         assert out.strip() == expected, out

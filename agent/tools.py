@@ -1,4 +1,4 @@
-"""The agent's one tool: run model-written Python in a sandboxed session that keeps its variables."""
+"""The agent's one tool: run model-written Python in a sandboxed session that keeps variables."""
 
 import contextlib
 import json
@@ -26,7 +26,7 @@ OUTPUT_CAP = 2000  # characters the model gets back
 class Dataset:
     """Everything the agent needs to know about one set of tasks (DABstep, the bank test set)."""
     data: Path  # files the code sees read-only at /data
-    helpers: Path  # tested helper modules, importable inside the sandbox, seen read-only at /helpers
+    helpers: Path  # tested helper modules, importable in the sandbox, seen read-only at /helpers
     preload: str  # run in every new session before the model's first call
     system_prompt: Callable[[], str]
 
@@ -60,7 +60,7 @@ for line in requests:
 
 
 def sandbox_command(dataset: Dataset, scratch: Path) -> list[str]:
-    """bwrap command that runs the session server with a tiny, mostly read-only filesystem and no network.
+    """bwrap command that runs the session server: tiny, mostly read-only filesystem, no network.
 
     Inside, the code sees only: /usr (system, read-only), /venv (pandas, read-only),
     /data (the dataset's files, read-only), /helpers (our helper modules, read-only),
@@ -100,12 +100,14 @@ class PythonSession:
     starts a fresh one, and the model is told its variables are gone.
     """
 
-    def __init__(self, dataset: Dataset, scratch: Path = SCRATCH / "default", timeout: float = TIMEOUT_S):
+    def __init__(
+        self, dataset: Dataset, scratch: Path = SCRATCH / "default", timeout: float = TIMEOUT_S
+    ):
         self.dataset = dataset
         self.scratch = scratch
         self.timeout = timeout
         self.proc = None
-        # LangGraph runs a reply's tool calls in parallel threads; one process can only answer one at a time.
+        # LangGraph runs a reply's tool calls in parallel threads; the process serves one at a time.
         self.lock = threading.Lock()
 
     def run(self, code: str) -> str:
@@ -116,12 +118,12 @@ class PythonSession:
     def _run(self, code: str) -> str:
         if self.proc is None:
             self.scratch.mkdir(parents=True, exist_ok=True)
-            self.proc = _LAUNCHER.submit(subprocess.Popen, sandbox_command(self.dataset, self.scratch), text=True,
-                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE).result()
+            self.proc = self._start()
         try:
             self.proc.stdin.write(json.dumps(code) + "\n")
             self.proc.stdin.flush()
-            if not select.select([self.proc.stdout], [], [], self.timeout)[0]:
+            ready, _, _ = select.select([self.proc.stdout], [], [], self.timeout)
+            if not ready:
                 self.close()
                 return (f"[killed: still running after {self.timeout:g} s. "
                         "The Python session was restarted: earlier variables are gone]")
@@ -133,12 +135,21 @@ class PythonSession:
             return "[the Python session ended: earlier variables are gone]"
         return cap(json.loads(reply))
 
+    def _start(self) -> subprocess.Popen:
+        """Start the sandbox from the long-lived launcher thread (see _LAUNCHER)."""
+        command = sandbox_command(self.dataset, self.scratch)
+        started = _LAUNCHER.submit(
+            subprocess.Popen, command, text=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE
+        )
+        return started.result()
+
     def close(self) -> None:
         if self.proc:
             self.proc.kill()
             self.proc.wait()
             for pipe in (self.proc.stdin, self.proc.stdout):
-                with contextlib.suppress(OSError):  # a write left in the buffer can't reach the dead process
+                # A write left in the buffer can't reach the dead process.
+                with contextlib.suppress(OSError):
                     pipe.close()
             self.proc = None
 
@@ -149,7 +160,9 @@ class PythonSession:
         self.close()
 
 
-def run_python(code: str, dataset: Dataset, scratch: Path = SCRATCH / "default", timeout: float = TIMEOUT_S) -> str:
+def run_python(
+    code: str, dataset: Dataset, scratch: Path = SCRATCH / "default", timeout: float = TIMEOUT_S
+) -> str:
     """Run `code` once in a fresh session and close it (nothing is kept)."""
     with PythonSession(dataset, scratch, timeout) as session:
         return session.run(code)

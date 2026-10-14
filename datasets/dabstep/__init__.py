@@ -1,4 +1,4 @@
-"""DABstep: the payments files, the tested fee-rule helpers and the system prompt that describes them."""
+"""DABstep: the payments files, the tested fee-rule helpers and the system prompt about them."""
 
 from pathlib import Path
 

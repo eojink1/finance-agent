@@ -1,4 +1,7 @@
-"""Fails loudly if the fee-rule helpers stop following the manual. Run: uv run python checks/check_fee_rules.py"""
+"""Fails loudly if the fee-rule helpers stop following the manual.
+
+Run: uv run python checks/check_fee_rules.py
+"""
 
 import os
 import sys
@@ -17,8 +20,10 @@ assert fr.fee({"fixed_amount": 0.1, "rate": 19}, 10) == 0.1 + 19 * 10 / 10000
 
 # 2. null and [] match anything; a list matches its members only.
 rule = {"aci": [], "is_credit": None, "account_type": ["R", "D"]}
-assert fr._field_matches(rule, "aci", "G") and fr._field_matches(rule, "is_credit", False)
-assert fr._field_matches(rule, "account_type", "R") and not fr._field_matches(rule, "account_type", "H")
+assert fr._field_matches(rule, "aci", "G")
+assert fr._field_matches(rule, "is_credit", False)
+assert fr._field_matches(rule, "account_type", "R")
+assert not fr._field_matches(rule, "account_type", "H")
 
 # 3. Ranges: volumes with k/m, fraud levels in percent, both ends of a range included.
 assert fr._field_matches({"monthly_volume": "100k-1m"}, "monthly_volume", 100_000)
@@ -27,8 +32,14 @@ assert fr._field_matches({"monthly_volume": ">5m"}, "monthly_volume", 5_000_001)
 assert fr._field_matches({"monthly_fraud_level": "7.2%-7.7%"}, "monthly_fraud_level", 7.7)
 assert not fr._field_matches({"monthly_fraud_level": ">8.3%"}, "monthly_fraud_level", 8.3)
 
-# 4. Capture delay: merchant days against '<3', '3-5', '>5'; 'immediate'/'manual' only match themselves.
-cd = lambda allowed, value: fr._field_matches({"capture_delay": allowed}, "capture_delay", value)
+# 4. Capture delay: merchant days against '<3', '3-5', '>5'; 'immediate' and 'manual' only match
+# themselves.
+
+
+def cd(allowed: str, value: str) -> bool:
+    return fr._field_matches({"capture_delay": allowed}, "capture_delay", value)
+
+
 assert cd("<3", "2") and cd("3-5", "3") and cd(">5", "7") and not cd(">5", "5")
 assert cd("manual", "manual") and not cd("<3", "immediate") and not cd("immediate", "1")
 
@@ -44,7 +55,8 @@ assert (fr._month(2023, 31), fr._month(2023, 32), fr._month(2023, 60)) == (1, 2,
 
 # 8. Inside the agent's sandbox the helpers are preloaded, read-only and use /data.
 with PythonSession(DABSTEP) as s:
-    assert s.run("print(len(matching_fee_rules(aci='B')))").strip() == str(len(fr.matching_fee_rules(aci="B")))
+    expected = str(len(fr.matching_fee_rules(aci="B")))
+    assert s.run("print(len(matching_fee_rules(aci='B')))").strip() == expected
     assert s.run("import os; print(os.access('/helpers/fee_rules.py', os.W_OK))").strip() == "False"
 
 print("all fee-rule checks passed")

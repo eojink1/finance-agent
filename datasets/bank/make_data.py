@@ -19,13 +19,21 @@ OUT = ROOT / "data" / "bank"
 START, END = date(2026, 1, 1), date(2026, 6, 30)
 
 GROCERS = ["TRADER JOE'S #552", "SAFEWAY #1234", "COSTCO WHSE #0412"]
-RESTAURANTS = ["CHIPOTLE 2291", "SQ *BLUE BOTTLE COFFEE", "SWEETGREEN SOMA", "DOORDASH*THAI BASIL",
-               "IN-N-OUT BURGER #88", "SQ *TARTINE BAKERY"]
+RESTAURANTS = [
+    "CHIPOTLE 2291",
+    "SQ *BLUE BOTTLE COFFEE",
+    "SWEETGREEN SOMA",
+    "DOORDASH*THAI BASIL",
+    "IN-N-OUT BURGER #88",
+    "SQ *TARTINE BAKERY",
+]
 
 
 def transactions(rng: random.Random) -> list[tuple]:
     rows = []  # (date, description, amount, category, account)
-    add = lambda d, desc, amount, cat, acct="credit card": rows.append((d, desc, round(amount, 2), cat, acct))
+
+    def add(d: date, desc: str, amount: float, cat: str, acct: str = "credit card") -> None:
+        rows.append((d, desc, round(amount, 2), cat, acct))
 
     day = START
     while day <= END:

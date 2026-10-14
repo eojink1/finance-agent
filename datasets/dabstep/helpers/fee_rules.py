@@ -51,8 +51,13 @@ def matching_fee_rules(card_scheme=None, account_type=None, merchant_category_co
     capture_delay: the merchant's value, e.g. '1', '7', 'immediate', 'manual'
     monthly_volume: euros in that calendar month      monthly_fraud_level: percent, e.g. 8.1
     """
-    facts = {k: v for k, v in locals().items() if v is not None}
-    return [rule for rule in fee_rules() if all(_field_matches(rule, k, v) for k, v in facts.items())]
+    # locals() here is exactly the arguments above, by name.
+    facts = {field: value for field, value in locals().items() if value is not None}
+    return [rule for rule in fee_rules() if _rule_matches(rule, facts)]
+
+
+def _rule_matches(rule: dict, facts: dict) -> bool:
+    return all(_field_matches(rule, field, value) for field, value in facts.items())
 
 
 def _field_matches(rule: dict, field: str, value) -> bool:
@@ -110,7 +115,8 @@ def monthly_stats(merchant: str, year: int, month: int) -> dict:
 def transaction_rules(row, merchant: dict | None = None, stats: dict | None = None) -> list[dict]:
     """Fee rules that apply to one payments.csv row, using its merchant and that month's stats."""
     merchant = merchant or merchant_info(row["merchant"])
-    stats = stats or monthly_stats(row["merchant"], row["year"], _month(row["year"], row["day_of_year"]))
+    month = _month(row["year"], row["day_of_year"])
+    stats = stats or monthly_stats(row["merchant"], row["year"], month)
     return matching_fee_rules(
         card_scheme=row["card_scheme"], account_type=merchant["account_type"],
         merchant_category_code=merchant["merchant_category_code"], is_credit=bool(row["is_credit"]),
